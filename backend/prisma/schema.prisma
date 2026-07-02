@@ -1,0 +1,60 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x"]
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  name      String?
+  password  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  projects  Project[]
+
+  @@map("users")
+}
+
+model Project {
+  id                 String              @id @default(uuid())
+  name               String
+  description        String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  optimizationModels OptimizationModel[]
+
+  @@map("projects")
+}
+
+model OptimizationModel {
+  id        String     @id @default(uuid())
+  type      String     // e.g. "LP", "TRANSPORT", "NETWORKS"
+  data      Json       // JSONB field to store dynamic structure
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  solutions Solution[]
+
+  @@map("optimization_models")
+}
+
+model Solution {
+  id             String            @id @default(uuid())
+  status         String            // e.g., "Optimal", "Infeasible"
+  objectiveValue Float?
+  variables      Json              // JSONB field for output variables
+  constraints    Json              // JSONB field for slack and shadow prices
+  createdAt      DateTime          @default(now())
+  modelId        String
+  model          OptimizationModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@map("solutions")
+}
