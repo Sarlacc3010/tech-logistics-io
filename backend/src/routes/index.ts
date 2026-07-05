@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { solveLP } from '../controllers/linear-programming.controller';
 import { askTutor } from '../controllers/gemini.controller';
+import { aiController } from '../controllers/ai.controller';
 import { getAuditLogs } from '../controllers/audit.controller';
 import { auditMiddleware } from '../middlewares/audit.middleware';
 import {
@@ -26,6 +27,9 @@ router.post('/inventories/solve', auditMiddleware('solver_inventories'), solveIn
 
 // Gemini AI Tutor endpoint (with audit logging)
 router.post('/tutor/ask', auditMiddleware('gemini_tutor'), askTutor);
+
+// Socratic AI Tutor (Dual-LLM)
+router.post('/ai-tutor/chat', aiController.processChat);
 
 // Audit logs retrieval
 router.get('/audit/logs', getAuditLogs);

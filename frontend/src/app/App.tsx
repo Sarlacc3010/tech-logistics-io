@@ -14,6 +14,9 @@ import {
   ChevronsLeft, ChevronsRight, Terminal,
 } from "lucide-react";
 
+import { AIChatbox } from "./components/AIChatbox";
+import { LogisticsForms } from "./components/LogisticsForms";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type ModuleId = "overview" | "lp" | "transport" | "networks" | "ip" | "dp" | "inventories";
@@ -1638,16 +1641,10 @@ export default function App() {
                   }
                 />
                 <div className="p-4 flex flex-col gap-2">
-                  <textarea
-                    value={jsonText}
-                    onChange={(e) => handleJsonChange(e.target.value)}
-                    rows={10}
-                    className="w-full font-mono text-xs p-3 rounded border bg-black text-emerald-400 focus:outline-none"
-                    style={{ borderColor: jsonError ? "#EF4444" : borderColor }}
+                  <LogisticsForms 
+                    data={activeModelData as any} 
+                    onChange={(newData) => handleJsonChange(JSON.stringify(newData, null, 2))} 
                   />
-                  {jsonError && (
-                    <p className="text-xs text-red-500 font-mono">Error de sintaxis JSON: {jsonError}</p>
-                  )}
                 </div>
               </Card>
             )}
