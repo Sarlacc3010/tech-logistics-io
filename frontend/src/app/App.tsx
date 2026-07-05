@@ -277,106 +277,220 @@ const ROUTES = [
   { from: "RTM", to: "DXB", active: true  },
 ];
 
-function LogisticsMap({ dark }: { dark: boolean }) {
-  const [hovered, setHovered] = useState<string | null>(null);
-  const hubMap = Object.fromEntries(HUBS.map(h => [h.id, h]));
-  const bg = dark ? "#070712" : "#EEF2F8";
-  const gridColor = dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)";
-  const activeRoute = dark ? "#3B82F6" : "#1345A8";
-  const inactiveRoute = dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
-  const hubColor = dark ? "#0EA5E9" : "#1345A8";
-  const hubGlow = dark ? "#3B82F6" : "#1345A8";
-  const textColor = dark ? "#9CA3AF" : "#6B7280";
+const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }> = {
+  // Transport hubs
+  "Seattle": { name: "Quito", coords: [-0.1807, -78.4678] },
+  "Denver": { name: "Manta", coords: [-0.9621, -80.7127] },
+  "Chicago": { name: "Guayaquil", coords: [-2.1894, -79.8890] },
+  "Miami": { name: "Cuenca", coords: [-2.9001, -79.0059] },
+  "New York": { name: "Ambato", coords: [-1.2491, -78.6273] },
+  "New_York": { name: "Ambato", coords: [-1.2491, -78.6273] },
+  "Dallas": { name: "Santo Domingo", coords: [-0.2530, -79.1754] },
+  "Atlanta": { name: "Ibarra", coords: [0.3517, -78.1222] },
+
+  // Overview hubs
+  "NY": { name: "Quito", coords: [-0.1807, -78.4678] },
+  "LA": { name: "Guayaquil", coords: [-2.1894, -79.8890] },
+  "CHI": { name: "Cuenca", coords: [-2.9001, -79.0059] },
+  "HOU": { name: "Manta", coords: [-0.9621, -80.7127] },
+  "MIA": { name: "Ambato", coords: [-1.2491, -78.6273] },
+  "LDN": { name: "Santo Domingo", coords: [-0.2530, -79.1754] },
+  "HAM": { name: "Loja", coords: [-3.9931, -79.2042] },
+  "RTM": { name: "Esmeraldas", coords: [0.9682, -79.6517] },
+  "SHA": { name: "Machala", coords: [-3.2581, -79.9553] },
+  "SIN": { name: "Ibarra", coords: [0.3517, -78.1222] },
+  "TYO": { name: "Portoviejo", coords: [-1.0546, -80.4542] },
+  "DXB": { name: "Riobamba", coords: [-1.6709, -78.6475] },
+  "SAO": { name: "Tena", coords: [-0.9938, -77.8129] },
+  "MUM": { name: "Coca", coords: [-0.4665, -76.9871] },
+
+  // Network nodes
+  "Node 1": { name: "Esmeraldas (Nodo 1)", coords: [0.9682, -79.6517] },
+  "Node_1": { name: "Esmeraldas (Nodo 1)", coords: [0.9682, -79.6517] },
+  "Node 2": { name: "Ibarra (Nodo 2)", coords: [0.3517, -78.1222] },
+  "Node_2": { name: "Ibarra (Nodo 2)", coords: [0.3517, -78.1222] },
+  "Node 3": { name: "Santo Domingo (Nodo 3)", coords: [-0.2530, -79.1754] },
+  "Node_3": { name: "Santo Domingo (Nodo 3)", coords: [-0.2530, -79.1754] },
+  "Node 4": { name: "Riobamba (Nodo 4)", coords: [-1.6709, -78.6475] },
+  "Node_4": { name: "Riobamba (Nodo 4)", coords: [-1.6709, -78.6475] },
+  "Node 5": { name: "Loja (Nodo 5)", coords: [-3.9931, -79.2042] },
+  "Node_5": { name: "Loja (Nodo 5)", coords: [-3.9931, -79.2042] },
+  "Node 6": { name: "Tena (Nodo 6)", coords: [-0.9938, -77.8129] },
+  "Node_6": { name: "Tena (Nodo 6)", coords: [-0.9938, -77.8129] },
+};
+
+function getCityInfo(key: string) {
+  if (!key) return null;
+  // Normalize key by removing suffixes like _S1, _D1, etc.
+  const clean = key.split('_')[0].trim();
+  let info = ECUADOR_CITIES[clean];
+  if (!info) {
+    info = ECUADOR_CITIES[key];
+  }
+  if (!info && key.toLowerCase().startsWith("node")) {
+    const num = key.replace(/\D/g, "");
+    info = ECUADOR_CITIES[`Node ${num}`] || ECUADOR_CITIES[`Node_${num}`];
+  }
+  return info || null;
+}
+
+function LogisticsMap({ dark, routes, defaultCenter = [-1.8312, -78.1834], defaultZoom = 7 }: { dark: boolean; routes?: Array<{ from: string; to: string; units: number; active: boolean }>; defaultCenter?: [number, number]; defaultZoom?: number }) {
+  const mapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let isMapMounted = true;
+    if (!mapRef.current) return;
+    const L = (window as any).L;
+    if (!L) {
+      console.warn("Leaflet library not loaded yet.");
+      return;
+    }
+
+    // Initialize map focused strictly on Ecuador, locking user zoom and bounds.
+    const map = L.map(mapRef.current, {
+      center: defaultCenter,
+      zoom: defaultZoom,
+      minZoom: 6,
+      maxZoom: 11,
+      maxBounds: [[-5.2, -82.0], [2.2, -74.5]], // Bounding box limits for Ecuador
+      zoomControl: true,
+    });
+
+    const tileUrl = dark 
+      ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" 
+      : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+
+    const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+    L.tileLayer(tileUrl, { attribution }).addTo(map);
+
+    if (routes && routes.length > 0) {
+      const markersAdded = new Set<string>();
+
+      routes.forEach(r => {
+        const fromInfo = getCityInfo(r.from);
+        const toInfo = getCityInfo(r.to);
+
+        if (fromInfo && toInfo) {
+          // Source marker
+          if (!markersAdded.has(r.from)) {
+            L.marker(fromInfo.coords, {
+              icon: L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="background-color: ${dark ? '#3B82F6' : '#1345A8'}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.3);"></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+              })
+            }).addTo(map).bindPopup(`<b>${fromInfo.name}</b>`);
+            markersAdded.add(r.from);
+          }
+
+          // Target marker
+          if (!markersAdded.has(r.to)) {
+            L.marker(toInfo.coords, {
+              icon: L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="background-color: ${r.active ? '#10B981' : '#EF4444'}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.3);"></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+              })
+            }).addTo(map).bindPopup(`<b>${toInfo.name}</b>`);
+            markersAdded.add(r.to);
+          }
+
+          // Render direct path synchronously first (as fallback)
+          const color = r.active ? (dark ? "#10B981" : "#059669") : (dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)");
+          const weight = r.active ? 3 : 1.5;
+          const poly = L.polyline([fromInfo.coords, toInfo.coords], {
+            color: color,
+            weight: weight,
+            dashArray: r.active ? undefined : '5, 5',
+            opacity: r.active ? 0.9 : 0.4
+          }).addTo(map);
+
+          if (r.active) {
+            poly.bindPopup(`<b>Ruta Activa (Directa):</b> ${fromInfo.name} &rarr; ${toInfo.name}<br/><b>Flujo:</b> ${r.units} unidades`);
+          }
+
+          // Fetch real driving route from OSRM asynchronously
+          fetch(`https://router.project-osrm.org/route/v1/driving/${fromInfo.coords[1]},${fromInfo.coords[0]};${toInfo.coords[1]},${toInfo.coords[0]}?overview=full&geometries=geojson`)
+            .then(res => res.json())
+            .then(data => {
+              if (!isMapMounted) return;
+              if (data.code === "Ok" && data.routes && data.routes[0]) {
+                const coords = data.routes[0].geometry.coordinates;
+                const latlngs = coords.map((c: [number, number]) => [c[1], c[0]]);
+                poly.setLatLngs(latlngs);
+                if (r.active) {
+                  poly.bindPopup(`<b>Ruta Activa (Vial):</b> ${fromInfo.name} &rarr; ${toInfo.name}<br/><b>Flujo:</b> ${r.units} unidades`);
+                }
+              }
+            })
+            .catch(err => {
+              console.warn("OSRM routing failed, keeping straight path:", err);
+            });
+        }
+      });
+    } else {
+      // Overview mode
+      HUBS.forEach(hub => {
+        const info = getCityInfo(hub.id);
+        if (info) {
+          L.marker(info.coords, {
+            icon: L.divIcon({
+              className: 'custom-div-icon',
+              html: `<div style="background-color: ${dark ? '#0EA5E9' : '#1345A8'}; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.3)"></div>`,
+              iconSize: [10, 10],
+              iconAnchor: [5, 5]
+            })
+          }).addTo(map).bindPopup(`<b>Hub:</b> ${info.name}`);
+        }
+      });
+
+      ROUTES.forEach(r => {
+        const fromInfo = getCityInfo(r.from);
+        const toInfo = getCityInfo(r.to);
+        if (fromInfo && toInfo) {
+          const color = r.active ? (dark ? "#0EA5E9" : "#1345A8") : (dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)");
+          
+          // Render direct path synchronously first (as fallback)
+          const poly = L.polyline([fromInfo.coords, toInfo.coords], {
+            color,
+            weight: r.active ? 2 : 1,
+            dashArray: r.active ? undefined : '3, 3',
+            opacity: r.active ? 0.8 : 0.4
+          }).addTo(map);
+
+          // Fetch real driving route from OSRM asynchronously
+          fetch(`https://router.project-osrm.org/route/v1/driving/${fromInfo.coords[1]},${fromInfo.coords[0]};${toInfo.coords[1]},${toInfo.coords[0]}?overview=full&geometries=geojson`)
+            .then(res => res.json())
+            .then(data => {
+              if (!isMapMounted) return;
+              if (data.code === "Ok" && data.routes && data.routes[0]) {
+                const coords = data.routes[0].geometry.coordinates;
+                const latlngs = coords.map((c: [number, number]) => [c[1], c[0]]);
+                poly.setLatLngs(latlngs);
+              }
+            })
+            .catch(err => {
+              console.warn("OSRM routing failed, keeping straight path:", err);
+            });
+        }
+      });
+    }
+
+    return () => {
+      isMapMounted = false;
+      map.remove();
+    };
+  }, [dark, routes, defaultCenter, defaultZoom]);
 
   return (
-    <div className="relative w-full rounded-lg overflow-hidden" style={{ background: bg, aspectRatio: "800/280" }}>
-      <svg viewBox="0 0 800 280" className="w-full h-full" style={{ fontFamily: "DM Mono, monospace" }}>
-        {/* Grid */}
-        {Array.from({ length: 17 }, (_, i) => (
-          <line key={`vg${i}`} x1={i * 50} y1={0} x2={i * 50} y2={280} stroke={gridColor} strokeWidth={0.5} />
-        ))}
-        {Array.from({ length: 7 }, (_, i) => (
-          <line key={`hg${i}`} x1={0} y1={i * 47} x2={800} y2={i * 47} stroke={gridColor} strokeWidth={0.5} />
-        ))}
-
-        {/* Continent fills (very simplified) */}
-        {[
-          // N. America
-          "M 55,42 L 195,32 L 220,54 L 238,90 L 245,118 L 252,152 L 242,178 L 220,198 L 195,208 L 170,196 L 145,178 L 118,162 L 88,148 L 64,130 L 54,100 Z",
-          // S. America
-          "M 188,208 L 278,208 L 302,232 L 312,272 L 298,208 Z M 230,208 L 278,210 L 304,250 L 308,274 L 286,196 Z",
-          // Europe/part
-          "M 365,36 L 450,34 L 458,58 L 442,78 L 420,92 L 400,96 L 375,84 L 362,62 Z",
-          // Africa
-          "M 362,108 L 450,104 L 458,150 L 448,192 L 432,238 L 412,268 L 390,272 L 366,252 L 350,208 L 348,162 L 356,132 Z",
-          // Asia
-          "M 460,32 L 560,22 L 660,28 L 730,44 L 755,72 L 748,102 L 720,124 L 708,144 L 672,152 L 645,158 L 618,196 L 598,200 L 570,192 L 546,170 L 518,160 L 485,152 L 462,132 L 448,102 L 448,62 Z",
-          // Australia
-          "M 618,244 L 708,236 L 746,264 L 748,296 L 716,316 L 672,318 L 638,302 L 618,276 Z",
-        ].map((d, i) => (
-          <path key={i} d={d} fill={dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.04)"} stroke={dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.08)"} strokeWidth={0.5} />
-        ))}
-
-        {/* Route lines */}
-        {ROUTES.map(({ from, to, active }, i) => {
-          const a = hubMap[from], b = hubMap[to];
-          if (!a || !b) return null;
-          const isHov = hovered === from || hovered === to;
-          const color = active ? activeRoute : inactiveRoute;
-          const dashLen = Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2);
-          return (
-            <g key={i}>
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                stroke={color} strokeWidth={isHov ? 1.5 : active ? 1 : 0.7}
-                strokeDasharray={active ? `${dashLen}` : "4 4"}
-                strokeDashoffset={active ? `${dashLen}` : undefined}
-                opacity={isHov ? 1 : active ? 0.8 : 0.4}>
-                {active && (
-                  <animate attributeName="stroke-dashoffset"
-                    from={`${dashLen}`} to="0"
-                    dur={`${3 + i * 0.4}s`} repeatCount="indefinite" />
-                )}
-              </line>
-            </g>
-          );
-        })}
-
-        {/* Hub nodes */}
-        {HUBS.map(hub => {
-          const isHov = hovered === hub.id;
-          return (
-            <g key={hub.id} style={{ cursor: "pointer" }}
-              onMouseEnter={() => setHovered(hub.id)}
-              onMouseLeave={() => setHovered(null)}>
-              {isHov && (
-                <circle cx={hub.x} cy={hub.y} r={10} fill={hubGlow} opacity={0.15}>
-                  <animate attributeName="r" values="8;14;8" dur="1.5s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.15;0.05;0.15" dur="1.5s" repeatCount="indefinite" />
-                </circle>
-              )}
-              <circle cx={hub.x} cy={hub.y} r={isHov ? 5 : 3.5} fill={hubColor}
-                stroke={dark ? "#050505" : "#F4F7F6"} strokeWidth={1.5}
-                style={{ filter: `drop-shadow(0 0 4px ${hubColor}80)` }} />
-              <text x={hub.x} y={hub.y - 8} textAnchor="middle"
-                fill={isHov ? hubColor : textColor}
-                fontSize={isHov ? 9 : 8} fontWeight={isHov ? 600 : 400}>
-                {hub.id}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Legend */}
-        <g>
-          <circle cx={16} cy={266} r={3} fill={activeRoute} />
-          <text x={24} y={270} fill={textColor} fontSize={8}>Active route</text>
-          <line x1={90} y1={266} x2={104} y2={266} stroke={inactiveRoute} strokeWidth={1} strokeDasharray="3 3" />
-          <text x={110} y={270} fill={textColor} fontSize={8}>Standby</text>
-        </g>
-      </svg>
-      <div className="absolute top-2 right-3 flex items-center gap-1.5">
+    <div className="relative w-full rounded-lg overflow-hidden border border-border" style={{ height: "600px" }}>
+      <div ref={mapRef} className="w-full h-full" style={{ zIndex: 1 }} />
+      <div className="absolute top-2 right-3 flex items-center gap-1.5 px-2 py-1 rounded bg-background/80 border border-border backdrop-blur-sm" style={{ zIndex: 400 }}>
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-        <span className="text-[10px] font-mono text-muted-foreground">LIVE</span>
+        <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">MAPA ACTIVO</span>
       </div>
     </div>
   );
@@ -412,7 +526,7 @@ function OverviewView({ dark }: { dark: boolean }) {
           </>}
         />
         <div className="p-4">
-          <LogisticsMap dark={dark} />
+          <LogisticsMap dark={dark} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
         </div>
       </Card>
 
@@ -607,12 +721,23 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
 
   const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 8440;
 
+  const mapRoutes = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
+    from: v.origin,
+    to: v.destination,
+    units: v.units,
+    active: v.units > 0
+  })) : [
+    { from: "Seattle", to: "Denver", units: 240, active: true },
+    { from: "Chicago", to: "Chicago", units: 100, active: false },
+    { from: "New York", to: "New York", units: 100, active: false },
+  ];
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <SectionHeader title="Network Route Map" sub="3 origins · 4 destinations · optimal allocation visualized" />
+        <SectionHeader title="Mapa Real de Rutas de Transporte" sub="Orígenes y destinos óptimos calculados visualizados en mapa real" />
         <div className="p-4">
-          <LogisticsMap dark={dark} />
+          <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
         </div>
       </Card>
 
@@ -704,8 +829,31 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
 
   const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 6820;
 
+  const mapRoutes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
+    Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
+      from: src,
+      to: tgt,
+      units: flow,
+      active: flow > 0
+    }))
+  ) : [
+    { from: "Node_1", to: "Node_3", units: 150, active: true },
+    { from: "Node_1", to: "Node_4", units: 50, active: true },
+    { from: "Node_2", to: "Node_3", units: 100, active: true },
+    { from: "Node_2", to: "Node_4", units: 50, active: true },
+    { from: "Node_3", to: "Node_5", units: 200, active: true },
+    { from: "Node_4", to: "Node_5", units: 150, active: true },
+  ];
+
   return (
     <div className="flex flex-col gap-4">
+      <Card>
+        <SectionHeader title="Mapa Real de Flujo de Redes" sub="Visualización interactiva de nodos y arcos con flujos óptimos calculados" />
+        <div className="p-4">
+          <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Card>
           <SectionHeader title="Node Flow Analysis" sub={`Min-cost flow · total flow: 350 units · total cost: $${totalCost.toLocaleString()}`} />
@@ -1512,7 +1660,27 @@ export default function App() {
       {/* AI Tutor */}
       <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} />
 
-      <style>{`* { scrollbar-width: none; } *::-webkit-scrollbar { display: none; }`}</style>
+      <style>{`
+        * { scrollbar-width: none; }
+        *::-webkit-scrollbar { display: none; }
+        .leaflet-container, 
+        .leaflet-container *, 
+        .leaflet-grab, 
+        .leaflet-grabbing, 
+        .leaflet-pane, 
+        .leaflet-tile-pane,
+        .leaflet-map-pane {
+          cursor: default !important;
+        }
+        .custom-div-icon, 
+        .leaflet-marker-icon, 
+        .leaflet-interactive, 
+        .leaflet-control-zoom-in, 
+        .leaflet-control-zoom-out, 
+        .leaflet-control-zoom a {
+          cursor: pointer !important;
+        }
+      `}</style>
     </div>
   );
 }
