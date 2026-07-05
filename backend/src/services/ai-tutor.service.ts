@@ -7,71 +7,57 @@ dotenv.config();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "dummy_key");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "dummy_key" });
 
-export interface LogisticsExtraction {
-  origin: string;
-  destination: string;
-  weight: number;
-  unit: string;
-  stops: string[];
-  equations: string[];
-  constraints: string[];
-}
-
 export class AITutorService {
-  /**
-   * Primary Solver LLM (Groq - Llama 3 70B or Mixtral 8x7b) extracts data from the user problem.
-   * Llama 3 70B is excellent for reasoning and following complex instructions very quickly.
-   */
-  async extractProblemData(prompt: string): Promise<LogisticsExtraction> {
+  async extractProblemData(prompt: string) {
     try {
       const completion = await groq.chat.completions.create({
         messages: [
           {
             role: "system",
-            content: `You are an expert logistics AI tutor. The user will provide a logistics problem.
-Extract the parameters and return ONLY a valid JSON object matching this schema, with no markdown formatting, no backticks, and no introductory text:
-{
-  "origin": "City Name",
-  "destination": "City Name",
-  "weight": 0,
-  "unit": "kg/tons/lbs",
-  "stops": ["Stop 1", "Stop 2"],
-  "equations": ["Math formulas used"],
-  "constraints": ["Time limits, cost limits, etc"]
-}`
+            content: `You are an expert Operations Research AI tutor. Classify the user's problem into one of these modules: "lp" (Linear Programming), "transport" (Transport/Cost Matrix), "networks" (Network Flow), "inventories" (Inventory/EOQ).
+Extract the parameters and return ONLY a valid JSON object with NO markdown formatting.
+
+Format requirements based on problemType:
+For "lp":
+{ "problemType": "lp", "data": [ { "name": "Constraint 1", "rhsLow": 100, "rhsHigh": 200 } ] } // Simplified constraint list
+
+For "transport":
+{ "problemType": "transport", "data": [ { "origin": "City A", "destination": "City B", "cost": 10, "supply": 100, "demand": 50 } ] }
+
+For "networks":
+{ "problemType": "networks", "data": { "nodes": [ { "node": "Source A", "type": "Fuente", "flow_out": 100, "flow_in": 0 } ] } }
+
+For "inventories":
+{ "problemType": "inventories", "data": [ { "sku": "Item 1", "qty": 100, "reorder": 50, "eoq": 200, "status": "Reordenar" } ] }
+
+Match your extraction array structure as closely as possible to these examples.`
           },
           { role: "user", content: prompt }
         ],
-        model: "llama3-70b-8192", // We use Llama 3 70B via Groq for high accuracy reasoning
-        temperature: 0.1, // Low temperature for deterministic outputs
+        model: "llama3-70b-8192",
+        temperature: 0.1,
       });
 
       const content = completion.choices[0]?.message?.content || "{}";
-      // Clean potential markdown just in case the LLM ignored instructions
       const cleaned = content.replace(/```json/gi, "").replace(/```/g, "").trim();
-      return JSON.parse(cleaned) as LogisticsExtraction;
+      return JSON.parse(cleaned);
     } catch (error) {
       console.error("Error in Solver LLM (Groq):", error);
       throw new Error("Failed to extract logistics problem data.");
     }
   }
 
-  /**
-   * Validator LLM (Gemini 1.5 Pro) validates the extracted data and math.
-   * Gemini 1.5 Pro has a large context window and strong reasoning capabilities.
-   */
-  async validateData(data: LogisticsExtraction): Promise<{ isValid: boolean; corrections?: any; feedback: string }> {
+  async validateData(extractedObject: any) {
     try {
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-      const prompt = `You are an AI Validator. Review this extracted logistics JSON for structural and logical correctness:
-${JSON.stringify(data, null, 2)}
+      const prompt = `Review this Operations Research JSON for structural correctness and basic logical constraints (e.g. supply equals demand for transport if balanced, positive EOQ).
+${JSON.stringify(extractedObject, null, 2)}
 
-Ensure that 'origin' and 'destination' exist, and that 'weight' is a non-negative number. Check if the equations make logistical sense.
 Respond with ONLY a valid JSON object in this format (no markdown):
 {
   "isValid": true/false,
-  "feedback": "Your reasoning and suggestions here",
-  "corrections": {} // if invalid, provide the corrected JSON
+  "feedback": "Your reasoning here",
+  "corrections": {} // provide corrected JSON if invalid
 }`;
 
       const result = await model.generateContent(prompt);
@@ -81,19 +67,12 @@ Respond with ONLY a valid JSON object in this format (no markdown):
       return JSON.parse(cleaned);
     } catch (error) {
       console.error("Error in Validator LLM (Gemini):", error);
-      // Fallback if validator fails
-      return { isValid: true, feedback: "Validation skipped due to API error." };
+      return { isValid: true, feedback: "Validation skipped." };
     }
   }
 
-  /**
-   * Orchestrator function called by the controller.
-   */
   async processProblem(userMessage: string) {
-    // 1. Solve and Extract using Groq (Llama 3 70B)
     const extraction = await this.extractProblemData(userMessage);
-
-    // 2. Validate using Gemini (1.5 Pro)
     const validation = await this.validateData(extraction);
 
     if (!validation.isValid && validation.corrections) {

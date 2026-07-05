@@ -1655,7 +1655,12 @@ export default function App() {
       </div>
 
       {/* AI Tutor */}
-      <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} />
+      <div className="fixed bottom-6 right-6 w-96 h-[500px] z-50">
+        <AIChatbox onDataExtracted={(type, data) => {
+          if (typeof setActiveModule === "function") setActiveModule(type as any);
+          if (typeof setActiveModelData === "function") setActiveModelData(data);
+        }} />
+      </div>
 
       <style>{`
         * { scrollbar-width: none; }

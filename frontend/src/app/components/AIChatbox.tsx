@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { MessageSquare, Send, Bot, User, Loader2 } from 'lucide-react';
 
 interface AIChatboxProps {
-  onDataExtracted: (data: any) => void;
+  onDataExtracted: (type: string, data: any) => void;
 }
 
 export const AIChatbox: React.FC<AIChatboxProps> = ({ onDataExtracted }) => {
@@ -40,7 +40,12 @@ export const AIChatbox: React.FC<AIChatboxProps> = ({ onDataExtracted }) => {
         
         // Pasa los datos extraídos al componente padre (App.tsx)
         if (data.data.finalData) {
-          onDataExtracted(data.data.finalData);
+          const extracted = data.data.finalData;
+          if (extracted.problemType && extracted.data) {
+            onDataExtracted(extracted.problemType, extracted.data);
+          } else {
+            onDataExtracted('overview', extracted); // Fallback
+          }
         }
       } else {
         setMessages(prev => [...prev, { role: 'ai', content: 'Hubo un error procesando tu solicitud.' }]);
