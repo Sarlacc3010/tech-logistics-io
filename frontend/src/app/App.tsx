@@ -11,8 +11,13 @@ import {
   ChevronRight, Download, RefreshCw, Filter, MapPin, Activity,
   ArrowUpRight, ArrowDownRight, Brain, Zap, Menu, Globe,
   AlertTriangle, CheckCircle2, Clock, Info, ChevronDown,
-  ChevronsLeft, ChevronsRight, Terminal,
+  ChevronsLeft, ChevronsRight, Terminal, Paperclip, Check
 } from "lucide-react";
+import { TransportEditor } from "../components/TransportEditor";
+import { LPEditor } from "../components/LPEditor";
+import { NetworksEditor } from "../components/NetworksEditor";
+import { DynamicEditor } from "../components/DynamicEditor";
+import { InventoriesEditor } from "../components/InventoriesEditor";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -321,12 +326,15 @@ const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }>
 
 function getCityInfo(key: string) {
   if (!key) return null;
-  // Normalize key by removing suffixes like _S1, _D1, etc.
   const clean = key.split('_')[0].trim();
-  let info = ECUADOR_CITIES[clean];
+  let info = ECUADOR_CITIES[clean] || ECUADOR_CITIES[key];
+  
   if (!info) {
-    info = ECUADOR_CITIES[key];
+    const searchName = clean.toLowerCase();
+    const found = Object.values(ECUADOR_CITIES).find(v => v.name.toLowerCase() === searchName);
+    if (found) info = found;
   }
+
   if (!info && key.toLowerCase().startsWith("node")) {
     const num = key.replace(/\D/g, "");
     info = ECUADOR_CITIES[`Node ${num}`] || ECUADOR_CITIES[`Node_${num}`];
@@ -1073,13 +1081,13 @@ function InventoriesView({ dark, modelData }: { dark: boolean; modelData?: any }
 // ─── AI Tutor ─────────────────────────────────────────────────────────────────
 
 const MODULE_INTROS: Record<ModuleId, string> = {
-  overview:    "Bienvenido al Centro de Control de Tech-Logistics. Puedo ayudarte a interpretar KPIs, diagnosticar anomalías o realizar análisis de escenarios. ¿Qué te gustaría explorar?",
-  lp:          "Veo que estás revisando el optimizador lineal. La solución óptima actual Z* = $24.68k tiene dos restricciones activas. ¿Te gustaría analizar la interpretación del dual o realizar un análisis de sensibilidad?",
-  transport:   "El modelo de transporte muestra 6 rutas activas con un costo total de $8,440. El carril Seattle→Denver está completamente asignado. ¿Debería verificar asignaciones alternas?",
-  networks:    "El análisis de redes confirma un flujo de costo mínimo para 350 unidades. Los Nodos 3 y 4 son puntos de transbordo. ¿Quieres correr sensibilidad de capacidades de arcos?",
-  ip:          "El resolvedor PE/MIP convergió con un gap de optimidad del 1.71%. La relajación lineal dio $4,820.40 vs el óptimo entero de $4,740. ¿Quieres analizar el árbol de ramificación?",
-  dp:          "La programación dinámica resolvió el problema de inventario de 6 períodos con un costo total de $6,200. Las ecuaciones de Bellman indican ordenar en períodos 1, 3 y 5. ¿Quieres ver el detalle?",
-  inventories: "Auditoría de inventario: 3 SKUs requieren acción — TL-A0041 y TL-D0512 están por debajo del punto de reorden. ¿Calculamos los parámetros de EOQ revisados?",
+  overview:    "Bienvenido al Centro de Control. Como tu Consultor Ejecutivo, estoy listo para interpretar los KPIs y diagnosticar anomalías en tu cadena de suministro.",
+  lp:          "Módulo de Optimización Lineal. ¿Deseas que analice los resultados de la función objetivo o que evaluemos los ahorros marginales de tus recursos?",
+  transport:   "Módulo de Transporte. Estoy listo para evaluar el costo total de distribución y recomendar ajustes en tus rutas óptimas.",
+  networks:    "Módulo de Redes. ¿Quieres que analicemos los flujos de costo mínimo o identifiquemos los cuellos de botella en la red?",
+  ip:          "Módulo de Programación Entera. ¿Procedemos a evaluar las decisiones estratégicas de la solución exacta?",
+  dp:          "Módulo de Programación Dinámica. ¿Revisamos la política óptima y los costos acumulados por período?",
+  inventories: "Módulo de Inventarios. ¿Te gustaría analizar los parámetros de pedido óptimos y costos de almacenamiento?",
 };
 
 function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activeModule: ModuleId; activeModelData?: any }) {
@@ -1089,6 +1097,37 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
   const [typing, setTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevModule = useRef<ModuleId | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [pdfName, setPdfName] = useState<string | null>(null);
+
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setUploadingPdf(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    try {
+      const response = await fetch("http://localhost:4000/api/tutor/upload", {
+        method: "POST",
+        body: formData
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setPdfName(file.name);
+        setMessages(m => [...m, { role: "assistant", text: `📚 ¡Excelente! He leído tu documento "${file.name}" y lo he guardado en mi memoria vectorial. Ya puedes hacerme preguntas sobre él.` }]);
+      } else {
+        setMessages(m => [...m, { role: "assistant", text: `Error al leer el PDF: ${data.error}` }]);
+      }
+    } catch (err) {
+      setMessages(m => [...m, { role: "assistant", text: "Error de conexión al subir el PDF." }]);
+    } finally {
+      setUploadingPdf(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   useEffect(() => {
     if (prevModule.current !== activeModule) {
@@ -1219,18 +1258,32 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
           </div>
 
           {/* Input */}
-          <div className="px-4 py-3 border-t" style={{ borderColor: border }}>
+          <div className="px-4 py-3 border-t flex flex-col gap-2" style={{ borderColor: border }}>
+            {pdfName && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 w-fit">
+                <Check size={10} />
+                <span className="text-[9px] font-mono font-bold truncate max-w-[150px]">{pdfName}</span>
+              </div>
+            )}
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: dark ? "rgba(255,255,255,0.05)" : "#F4F7F6", border: `1px solid ${border}` }}>
-              <Terminal size={12} style={{ color: dark ? "#6B7280" : "#9CA3AF" }} className="shrink-0" />
+              <input type="file" ref={fileInputRef} accept="application/pdf" className="hidden" onChange={handlePdfUpload} />
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                disabled={uploadingPdf}
+                className="shrink-0 transition-opacity hover:opacity-70 disabled:opacity-30"
+              >
+                <Paperclip size={14} style={{ color: dark ? "#6B7280" : "#9CA3AF" }} />
+              </button>
               <input
                 className="flex-1 bg-transparent text-xs outline-none"
                 style={{ color: dark ? "#E2E8F0" : "#0D1B2A", fontFamily: "DM Mono, monospace" }}
-                placeholder="Ask about this module..."
+                placeholder={uploadingPdf ? "Leyendo PDF..." : "Pregunta algo..."}
                 value={input}
+                disabled={uploadingPdf}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && send()}
               />
-              <button onClick={send} className="shrink-0 transition-opacity hover:opacity-70">
+              <button onClick={send} disabled={uploadingPdf} className="shrink-0 transition-opacity hover:opacity-70 disabled:opacity-30">
                 <Send size={12} style={{ color: accent }} />
               </button>
             </div>
@@ -1638,15 +1691,29 @@ export default function App() {
                   }
                 />
                 <div className="p-4 flex flex-col gap-2">
-                  <textarea
-                    value={jsonText}
-                    onChange={(e) => handleJsonChange(e.target.value)}
-                    rows={10}
-                    className="w-full font-mono text-xs p-3 rounded border bg-black text-emerald-400 focus:outline-none"
-                    style={{ borderColor: jsonError ? "#EF4444" : borderColor }}
-                  />
-                  {jsonError && (
-                    <p className="text-xs text-red-500 font-mono">Error de sintaxis JSON: {jsonError}</p>
+                  {activeModule === "transport" ? (
+                    <TransportEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : (activeModule === "lp" || activeModule === "ip") ? (
+                    <LPEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : activeModule === "networks" ? (
+                    <NetworksEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : activeModule === "dp" ? (
+                    <DynamicEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : activeModule === "inventories" ? (
+                    <InventoriesEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : (
+                    <>
+                      <textarea
+                        value={jsonText}
+                        onChange={(e) => handleJsonChange(e.target.value)}
+                        rows={10}
+                        className="w-full font-mono text-xs p-3 rounded border bg-black text-emerald-400 focus:outline-none"
+                        style={{ borderColor: jsonError ? "#EF4444" : borderColor }}
+                      />
+                      {jsonError && (
+                        <p className="text-xs text-red-500 font-mono">Error de sintaxis JSON: {jsonError}</p>
+                      )}
+                    </>
                   )}
                 </div>
               </Card>
