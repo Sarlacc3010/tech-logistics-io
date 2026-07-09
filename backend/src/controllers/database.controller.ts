@@ -56,14 +56,25 @@ export async function updateModel(req: Request, res: Response, next: NextFunctio
       }
       solutionResult = await SolverClientService.solveTransport(data);
     } else if (model.type === 'NETWORKS') {
-      const { nodes, edges, demands, algorithm } = data;
-      if (!nodes || !edges || !demands) {
-        return res.status(400).json({ status: 'error', message: 'Faltan datos requeridos (nodes, edges, demands).' });
+      const { nodes, edges, algorithm, source_node, target_node } = data;
+      if (!nodes || !edges) {
+        return res.status(400).json({ status: 'error', message: 'Faltan datos requeridos (nodes, edges).' });
       }
-      if (algorithm === 'min_cost_flow') {
+      if (algorithm === 'shortest_path' || algorithm === 'max_flow') {
+        if (!source_node || !target_node) {
+          return res.status(400).json({ status: 'error', message: `El algoritmo ${algorithm} requiere que se especifique un Origen Padre (source_node) y un Destino Padre (target_node).` });
+        }
+        if (!nodes.includes(source_node) || !nodes.includes(target_node)) {
+          return res.status(400).json({ status: 'error', message: `El origen o destino padre no existen en la lista de nodos.` });
+        }
+      } else if (algorithm === 'min_cost_flow') {
+        const demands = data.demands;
+        if (!demands) {
+          return res.status(400).json({ status: 'error', message: 'Faltan datos requeridos para min_cost_flow (demands).' });
+        }
         const totalDemand = Object.values(demands).reduce((acc: number, val: any) => acc + Number(val), 0);
         if (totalDemand !== 0) {
-          return res.status(400).json({ status: 'error', message: `El modelo está desbalanceado. La suma de oferta y demanda debe ser 0 (Oferta = Demanda), pero la diferencia neta es ${totalDemand}. Revisa los datos de los nodos.` });
+          return res.status(400).json({ status: 'error', message: `El modelo está desbalanceado. La suma de oferta y demanda debe ser 0, pero la diferencia neta es ${totalDemand}. Revisa los datos de los nodos.` });
         }
       }
       solutionResult = await SolverClientService.solveNetworks(data);
@@ -81,8 +92,8 @@ export async function updateModel(req: Request, res: Response, next: NextFunctio
       include: { solutions: true }
     });
 
-    const variables = solutionResult.variables ?? solutionResult.allocations ?? solutionResult.result?.flows ?? solutionResult.result?.decisions ?? solutionResult.decisions ?? (solutionResult.result ? [solutionResult.result] : []);
-    const objectiveValue = solutionResult.objective_value ?? solutionResult.total_cost ?? solutionResult.result?.total_cost ?? solutionResult.optimal_value ?? solutionResult.objectiveValue ?? null;
+    const variables = solutionResult.variables ?? solutionResult.allocations ?? solutionResult.result?.path ?? solutionResult.result?.flows ?? solutionResult.result?.decisions ?? solutionResult.decisions ?? (solutionResult.result ? [solutionResult.result] : []);
+    const objectiveValue = solutionResult.objective_value ?? solutionResult.total_cost ?? solutionResult.result?.cost ?? solutionResult.result?.total_flow ?? solutionResult.result?.total_cost ?? solutionResult.optimal_value ?? solutionResult.objectiveValue ?? null;
     const constraints = solutionResult.constraints ?? solutionResult.details ?? {};
 
     const existingSolution = updatedModel.solutions[0];
@@ -122,7 +133,14 @@ export async function updateModel(req: Request, res: Response, next: NextFunctio
       status: 'success',
       data: finalModel
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.response && error.response.data) {
+      // Forward the error from the Python solver
+      return res.status(error.response.status).json({ 
+        status: 'error', 
+        message: error.response.data.detail || error.response.data.message || 'Error en el motor matemático' 
+      });
+    }
     next(error);
   }
 }

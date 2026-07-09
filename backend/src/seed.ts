@@ -108,29 +108,37 @@ async function main() {
     console.error('⚠️ Failed to solve/seed Transport:', err.message);
   }
 
-  // 6. Create Networks model & solve it (Min Cost Flow)
+  // 6. Create Networks model & solve it (Shortest Path)
+  const bidirectionalConnections = [
+    ['Quito', 'Santo Domingo', 150, 500],
+    ['Quito', 'Ibarra', 115, 300],
+    ['Quito', 'Latacunga', 100, 400],
+    ['Latacunga', 'Ambato', 40, 400],
+    ['Ambato', 'Riobamba', 50, 400],
+    ['Riobamba', 'Cuenca', 250, 200],
+    ['Cuenca', 'Loja', 200, 150],
+    ['Cuenca', 'Machala', 170, 200],
+    ['Guayaquil', 'Machala', 190, 300],
+    ['Guayaquil', 'Manta', 200, 300],
+    ['Guayaquil', 'Santo Domingo', 300, 400],
+    ['Guayaquil', 'Riobamba', 210, 250],
+    ['Guayaquil', 'Cuenca', 200, 250],
+    ['Manta', 'Santo Domingo', 260, 250],
+    ['Esmeraldas', 'Santo Domingo', 160, 200],
+    ['Puyo', 'Ambato', 100, 150]
+  ];
+
+  const bidirectionalEdges = bidirectionalConnections.flatMap(([a, b, dist, cap]) => [
+    { source: a, target: b, weight: dist, capacity: cap },
+    { source: b, target: a, weight: dist, capacity: cap }
+  ]);
+
   const networksData = {
-    algorithm: 'min_cost_flow',
-    nodes: ['Quito', 'Guayaquil', 'Cuenca', 'Santo_Domingo', 'Manta', 'Ambato', 'Riobamba'],
-    edges: [
-      { source: 'Manta', target: 'Santo_Domingo', capacity: 300, weight: 10 },
-      { source: 'Guayaquil', target: 'Santo_Domingo', capacity: 400, weight: 12 },
-      { source: 'Guayaquil', target: 'Riobamba', capacity: 250, weight: 15 },
-      { source: 'Guayaquil', target: 'Cuenca', capacity: 300, weight: 11 },
-      { source: 'Santo_Domingo', target: 'Quito', capacity: 500, weight: 8 },
-      { source: 'Santo_Domingo', target: 'Ambato', capacity: 250, weight: 12 },
-      { source: 'Riobamba', target: 'Ambato', capacity: 200, weight: 5 },
-      { source: 'Riobamba', target: 'Cuenca', capacity: 180, weight: 14 },
-    ],
-    source_node: null,
-    target_node: null,
-    demands: {
-      Quito: 300,       // Demand (Sink > 0)
-      Manta: -150,      // Supply (Source < 0)
-      Guayaquil: -400,  // Supply (Source < 0)
-      Cuenca: 150,      // Demand (Sink > 0)
-      Ambato: 100,      // Demand (Sink > 0)
-    },
+    algorithm: 'shortest_path',
+    nodes: ['Quito', 'Santo Domingo', 'Ibarra', 'Latacunga', 'Ambato', 'Riobamba', 'Cuenca', 'Loja', 'Machala', 'Guayaquil', 'Manta', 'Esmeraldas', 'Puyo'],
+    edges: bidirectionalEdges,
+    source_node: 'Guayaquil',
+    target_node: 'Quito',
   };
 
   const networksModel = await prisma.optimizationModel.create({
@@ -146,8 +154,8 @@ async function main() {
     await prisma.solution.create({
       data: {
         status: networksSol.status,
-        objectiveValue: networksSol.result.total_cost,
-        variables: networksSol.result.flows,
+        objectiveValue: networksSol.result.cost ?? networksSol.result.total_cost ?? 0,
+        variables: networksSol.result.path ?? networksSol.result.flows ?? {},
         constraints: {},
         modelId: networksModel.id,
       },

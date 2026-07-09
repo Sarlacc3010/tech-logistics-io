@@ -301,6 +301,8 @@ const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }>
   "Portoviejo": { name: "Portoviejo", coords: [-1.0546, -80.4542] },
   "Riobamba": { name: "Riobamba", coords: [-1.6709, -78.6475] },
   "Tena": { name: "Tena", coords: [-0.9938, -77.8129] },
+  "Latacunga": { name: "Latacunga", coords: [-0.9333, -78.6167] },
+  "Puyo": { name: "Puyo", coords: [-1.4833, -78.0000] },
   "Coca": { name: "Coca", coords: [-0.4665, -76.9871] },
 
   // Overview hubs
@@ -863,31 +865,70 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
   const netData = modelData?.data;
 
-  const displayNodes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
-    Object.entries(targets).map(([tgt, flow]: [string, any]) => {
-      const edge = netData?.edges?.find((e: any) => e.source === src && e.target === tgt);
-      const cost = edge ? edge.weight * flow : 0;
-      return {
-        node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
-        type: flow > 0 ? "Active Arc" : "Inactive Arc",
-        flow_in: flow,
-        flow_out: flow,
-        excess: flow > 0 ? flow : 0,
-        cost: cost
-      };
-    })
-  ).filter(r => r.flow_in > 0) : null;
+  let displayNodes: any[] = [];
+  let mapRoutes: any[] = [];
 
-  const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 0;
+  if (activeSolution && activeSolution.variables) {
+    // Build mapRoutes from netData.edges so the entire network is always visible
+    mapRoutes = netData?.edges?.map((e: any) => ({
+      from: e.source.replace(/_/g, ' '),
+      to: e.target.replace(/_/g, ' '),
+      units: 0,
+      active: false
+    })) || [];
 
-  const mapRoutes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
-    Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
-      from: src.replace(/_/g, ' '),
-      to: tgt.replace(/_/g, ' '),
-      units: flow,
-      active: flow > 0
-    }))
-  ) : [];
+    if (Array.isArray(activeSolution.variables)) {
+      // Shortest path format: ['Guayaquil', 'Santo Domingo', 'Quito']
+      const path = activeSolution.variables;
+      for (let i = 0; i < path.length - 1; i++) {
+        const src = path[i];
+        const tgt = path[i + 1];
+        const edge = netData?.edges?.find((e: any) => e.source === src && e.target === tgt);
+        const cost = edge ? edge.weight : 0;
+        displayNodes.push({
+          node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
+          type: "Active Arc",
+          flow_in: 1, flow_out: 1, excess: 1, cost: cost
+        });
+        
+        // Update mapRoutes to highlight the path
+        const mapSrc = src.replace(/_/g, ' ');
+        const mapTgt = tgt.replace(/_/g, ' ');
+        const route = mapRoutes.find(r => r.from === mapSrc && r.to === mapTgt);
+        if (route) {
+          route.active = true;
+          route.units = 1;
+        }
+      }
+    } else {
+      // Min cost flow / Max flow format
+      displayNodes = Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
+        Object.entries(targets).map(([tgt, flow]: [string, any]) => {
+          const edge = netData?.edges?.find((e: any) => e.source === src && e.target === tgt);
+          const cost = edge ? edge.weight * flow : 0;
+          return {
+            node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
+            type: flow > 0 ? "Active Arc" : "Inactive Arc",
+            flow_in: flow, flow_out: flow, excess: flow > 0 ? flow : 0, cost: cost
+          };
+        })
+      ).filter(r => r.flow_in > 0);
+
+      Object.entries(activeSolution.variables).forEach(([src, targets]: [string, any]) => {
+        Object.entries(targets).forEach(([tgt, flow]: [string, any]) => {
+          if (flow > 0) {
+            const route = mapRoutes.find(r => r.from === src.replace(/_/g, ' ') && r.to === tgt.replace(/_/g, ' '));
+            if (route) {
+              route.active = true;
+              route.units = flow;
+            }
+          }
+        });
+      });
+    }
+  }
+
+  const totalCost = activeSolution?.objectiveValue ?? 0;
 
   // Generate Cumulative Cost Data for LineChart
   const cumulativeData: any[] = [];
@@ -914,38 +955,40 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
       </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {/* Nodos Input Table */}
-        <Card>
-          <SectionHeader title="Nodos del Sistema" sub="Oferta y Demanda de cada ciudad" />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Ciudad / Nodo", "Tipo", "Oferta / Demanda (Unidades)"].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {netData?.nodes?.map((node: string, i: number) => {
-                  const demand = netData.demands?.[node] || 0;
-                  const type = demand < 0 ? "Planta (Oferta)" : demand > 0 ? "Cliente (Demanda)" : "Transbordo";
-                  return (
-                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-5 py-3 font-mono text-[11px] text-foreground">{node.replace(/_/g, ' ')}</td>
-                      <td className="px-5 py-3">
-                        <Badge label={type} variant={demand < 0 ? "info" : demand > 0 ? "warning" : "default"} />
-                      </td>
-                      <td className={`px-5 py-3 font-mono font-semibold ${demand < 0 ? "text-emerald-600" : demand > 0 ? "text-red-500" : "text-muted-foreground"}`}>
-                        {Math.abs(demand)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        {/* Nodos Input Table - Only relevant for Min Cost Flow */}
+        {netData?.algorithm === 'min_cost_flow' && (
+          <Card>
+            <SectionHeader title="Nodos del Sistema" sub="Oferta y Demanda de cada ciudad" />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Ciudad / Nodo", "Tipo", "Oferta / Demanda (Unidades)"].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {netData?.nodes?.map((node: string, i: number) => {
+                    const demand = netData.demands?.[node] || 0;
+                    const type = demand < 0 ? "Planta (Oferta)" : demand > 0 ? "Cliente (Demanda)" : "Transbordo";
+                    return (
+                      <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-5 py-3 font-mono text-[11px] text-foreground">{node.replace(/_/g, ' ')}</td>
+                        <td className="px-5 py-3">
+                          <Badge label={type} variant={demand < 0 ? "info" : demand > 0 ? "warning" : "default"} />
+                        </td>
+                        <td className={`px-5 py-3 font-mono font-semibold ${demand < 0 ? "text-emerald-600" : demand > 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                          {Math.abs(demand)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
         {/* Edges Input Table */}
         <Card>
@@ -990,7 +1033,7 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
                   <tr key={i} className="hover:bg-secondary/30 transition-colors">
                     <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
                     <td className="px-5 py-3 font-mono font-semibold text-emerald-600">{r.excess} u.</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-primary">${r.cost.toLocaleString()}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-primary">${(r.cost ?? 0).toLocaleString()}</td>
                   </tr>
                 )) : null}
               </tbody>

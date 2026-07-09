@@ -117,9 +117,9 @@ ${ragContext}
     try {
       const chatCompletion = await groq.chat.completions.create({
         messages: messages,
-        model: "llama-3.3-70b-versatile",
+        model: "llama-3.1-8b-instant",
         temperature: 0.5,
-        max_tokens: 1200,
+        max_tokens: 4000,
         tools: hasModelData ? [UPDATE_TOOL] : undefined,
         tool_choice: hasModelData ? "auto" : undefined,
       });
@@ -149,7 +149,7 @@ ${ragContext}
           } catch (parseErr) {
             console.error("Error parsing tool call arguments:", parseErr);
             return {
-              reply: message.content || "Hubo un error al procesar la actualización de datos. Por favor, intenta de nuevo."
+              reply: message.content || "Hubo un error al procesar la actualización de datos (el JSON fue muy grande). Por favor, intenta de nuevo."
             };
           }
         }
@@ -159,9 +159,11 @@ ${ragContext}
       return {
         reply: message?.content || "Lo siento, no pude procesar tu solicitud."
       };
-    } catch (error) {
-      console.error("Error calling Groq API:", error);
-      throw error;
+    } catch (groqError: any) {
+      console.error("Groq API Error:", groqError);
+      return {
+        reply: "Tuve un problema de conexión con el servidor de Inteligencia Artificial o el análisis tomó demasiado tiempo. Por favor, intenta enviando tu mensaje nuevamente en unos segundos."
+      };
     }
   }
 }

@@ -68,23 +68,35 @@ def solve_network(payload: NetworkProblemInput):
         if alg == "shortest_path":
             if not payload.source_node or not payload.target_node:
                 raise HTTPException(status_code=400, detail="source_node and target_node are required for shortest_path")
-            length = nx.shortest_path_length(G, source=payload.source_node, target=payload.target_node, weight='weight')
-            path = nx.shortest_path(G, source=payload.source_node, target=payload.target_node, weight='weight')
-            return NetworkSolutionOutput(
-                algorithm=payload.algorithm,
-                status="Optimal",
-                result={"path": path, "cost": length}
-            )
+            try:
+                length = nx.shortest_path_length(G, source=payload.source_node, target=payload.target_node, weight='weight')
+                path = nx.shortest_path(G, source=payload.source_node, target=payload.target_node, weight='weight')
+                return NetworkSolutionOutput(
+                    algorithm=payload.algorithm,
+                    status="Optimal",
+                    result={"path": path, "cost": length}
+                )
+            except nx.NetworkXNoPath:
+                raise HTTPException(status_code=400, detail=f"No existe una ruta posible entre {payload.source_node} y {payload.target_node}.")
+            except nx.NodeNotFound as e:
+                raise HTTPException(status_code=400, detail=f"Nodo no encontrado en el grafo: {str(e)}")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
             
         elif alg == "max_flow":
             if not payload.source_node or not payload.target_node:
                 raise HTTPException(status_code=400, detail="source_node and target_node are required for max_flow")
-            flow_value, flow_dict = nx.maximum_flow(G, payload.source_node, payload.target_node)
-            return NetworkSolutionOutput(
-                algorithm=payload.algorithm,
-                status="Optimal",
-                result={"total_flow": flow_value, "flows": flow_dict}
-            )
+            try:
+                flow_value, flow_dict = nx.maximum_flow(G, payload.source_node, payload.target_node)
+                return NetworkSolutionOutput(
+                    algorithm=payload.algorithm,
+                    status="Optimal",
+                    result={"total_flow": flow_value, "flows": flow_dict}
+                )
+            except nx.NodeNotFound as e:
+                raise HTTPException(status_code=400, detail=f"Nodo no encontrado en el grafo: {str(e)}")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
             
         elif alg == "min_cost_flow":
             if not payload.demands:
@@ -94,12 +106,19 @@ def solve_network(payload: NetworkProblemInput):
             for node, d in payload.demands.items():
                 G.nodes[node]['demand'] = int(d)
                 
-            flow_cost, flow_dict = nx.network_simplex(G)
-            return NetworkSolutionOutput(
-                algorithm=payload.algorithm,
-                status="Optimal",
-                result={"total_cost": flow_cost, "flows": flow_dict}
-            )
+            try:
+                flow_cost, flow_dict = nx.network_simplex(G)
+                return NetworkSolutionOutput(
+                    algorithm=payload.algorithm,
+                    status="Optimal",
+                    result={"total_cost": flow_cost, "flows": flow_dict}
+                )
+            except nx.NetworkXUnfeasible:
+                raise HTTPException(status_code=400, detail="El problema no es factible. Verifica que la suma de Oferta y Demanda sea cero, y que las capacidades sean suficientes.")
+            except nx.NetworkXError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
             
         elif alg == "min_spanning_tree":
             mst = nx.minimum_spanning_tree(G, weight='weight')
