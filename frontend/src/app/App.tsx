@@ -1,4 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Fragment } from "react";
+import { useParams, useNavigate } from "react-router";
+import { motion, AnimatePresence } from "motion/react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -18,6 +20,7 @@ import { LPEditor } from "../components/LPEditor";
 import { NetworksEditor } from "../components/NetworksEditor";
 import { DynamicEditor } from "../components/DynamicEditor";
 import { InventoriesEditor } from "../components/InventoriesEditor";
+import { AlgorithmSteps } from "../components/AlgorithmSteps";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -44,150 +47,25 @@ const MODULES: Module[] = [
   { id: "inventories",label: "Control de Inventarios",   shortLabel: "Inventarios", icon: Package,         description: "Lote Económico (EOQ) y análisis ABC", badge: "Nuevo" },
 ];
 
+// El tipo de modelo en la base de datos (Prisma) no coincide 1:1 con el ModuleId de la UI
+// ("dp" en la UI vs. "DYNAMIC" en la DB, "ip" reutiliza el mismo modelo "LP"), y la ruta del
+// solver tampoco ("dp" -> /api/dynamic/solve). Un solo mapeo evita repetir ese desfase en cada
+// lugar que busca el modelo activo.
+const MODULE_TO_DB_TYPE: Record<ModuleId, string> = {
+  overview: "", lp: "LP", ip: "LP", transport: "TRANSPORT", networks: "NETWORKS", dp: "DYNAMIC", inventories: "INVENTORIES",
+};
+const MODULE_TO_SOLVER_PATH: Record<ModuleId, string> = {
+  overview: "", lp: "lp", ip: "lp", transport: "transport", networks: "networks", dp: "dynamic", inventories: "inventories",
+};
+
 // ─── Data ────────────────────────────────────────────────────────────────────
-
-const shipmentTrend = [
-  { month: "Ene", volume: 8420, revenue: 2140, cost: 1680 },
-  { month: "Feb", volume: 9310, revenue: 2390, cost: 1820 },
-  { month: "Mar", volume: 8890, revenue: 2280, cost: 1750 },
-  { month: "Abr", volume: 10450, revenue: 2760, cost: 1940 },
-  { month: "May", volume: 11200, revenue: 2980, cost: 2010 },
-  { month: "Jun", volume: 10800, revenue: 2850, cost: 1970 },
-  { month: "Jul", volume: 12340, revenue: 3280, cost: 2150 },
-  { month: "Ago", volume: 11760, revenue: 3110, cost: 2090 },
-];
-
-const perfRadar = [
-  { metric: "A Tiempo", score: 94 },
-  { metric: "Tasa Relleno", score: 88 },
-  { metric: "Utilización", score: 79 },
-  { metric: "Precisión", score: 96 },
-  { metric: "Ef. Costo", score: 83 },
-  { metric: "Resiliencia", score: 71 },
-];
-
-const lpSolution = [
-  { variable: "x₁ (Producto A)", value: 24.00, reducedCost: 0.00, lower: 18.0, upper: "∞" },
-  { variable: "x₂ (Producto B)", value: 36.00, reducedCost: 0.00, lower: 0.0,  upper: 48.0 },
-  { variable: "x₃ (Producto C)", value: 0.00,  reducedCost: -1.20, lower: "-∞", upper: 12.0 },
-];
-const lpConstraints = [
-  { name: "Horas Mano Obra", slack: 0.00,  shadowPrice: 0.840, rhsLow: 210.0, rhsHigh: 265.0 },
-  { name: "Materia Prima",   slack: 12.50, shadowPrice: 0.000, rhsLow: 245.0, rhsHigh: "∞"   },
-  { name: "Horas Máquina",   slack: 0.00,  shadowPrice: 0.320, rhsLow: 390.0, rhsHigh: 445.0 },
-];
-const lpSensChart = [
-  { constraint: "Mano Obra", current: 240, lower: 210, upper: 265 },
-  { constraint: "Mat. Prima",current: 270, lower: 245, upper: 320 },
-  { constraint: "Maquinaria",current: 420, lower: 390, upper: 445 },
-];
-
-const costMatrix = [
-  { origin: "Seattle (S1)",  denver: 12, chicago: 18, miami: 28, newYork: 22, supply: 180 },
-  { origin: "Dallas (S2)",   denver:  9, chicago: 14, miami: 16, newYork: 24, supply: 240 },
-  { origin: "Atlanta (S3)",  denver: 20, chicago: 11, miami:  8, newYork: 13, supply: 160 },
-  { origin: "Demanda",       denver: 140, chicago: 160, miami: 120, newYork: 160, supply: null },
-];
-const transportPlan = [
-  { route: "Seattle → Denver",   units: 140, cost: 1680, pct: 78, status: "Óptimo" },
-  { route: "Seattle → Chicago",  units:  40, cost:  720, pct: 22, status: "Óptimo" },
-  { route: "Dallas → Chicago",   units: 120, cost: 1680, pct: 50, status: "Óptimo" },
-  { route: "Dallas → New York",  units: 120, cost: 2880, pct: 50, status: "Óptimo" },
-  { route: "Atlanta → Miami",    units: 120, cost:  960, pct: 75, status: "Óptimo" },
-  { route: "Atlanta → New York", units:  40, cost:  520, pct: 25, status: "Subóptimo" },
-];
-
-const networkNodes = [
-  { node: "Nodo 1 (Origen A)", excess: 200, flow_out: 200, flow_in: 0,   type: "Fuente" },
-  { node: "Nodo 2 (Origen B)", excess: 150, flow_out: 150, flow_in: 0,   type: "Fuente" },
-  { node: "Nodo 3 (Transb.)",  excess: 0,   flow_out: 180, flow_in: 180, type: "Transbordo" },
-  { node: "Nodo 4 (Transb.)",  excess: 0,   flow_out: 170, flow_in: 170, type: "Transbordo" },
-  { node: "Nodo 5 (Destino A)",excess: -170, flow_out: 0,  flow_in: 170, type: "Sumidero" },
-  { node: "Nodo 6 (Destino B)",excess: -180, flow_out: 0,  flow_in: 180, type: "Sumidero" },
-];
-const networkFlow = [
-  { t: "T1", flowA: 145, flowB: 132, capacity: 200 },
-  { t: "T2", flowA: 178, flowB: 148, capacity: 200 },
-  { t: "T3", flowA: 192, flowB: 165, capacity: 200 },
-  { t: "T4", flowA: 180, flowB: 172, capacity: 200 },
-  { t: "T5", flowA: 188, flowB: 168, capacity: 200 },
-  { t: "T6", flowA: 195, flowB: 180, capacity: 200 },
-];
-
-const mipSolutions = [
-  { scenario: "Relajación LP", obj: 4820.40, x1: 14.2, x2: 8.6, x3: 5.1, x4: 11.8, gap: "—" },
-  { scenario: "Solución IP",   obj: 4740.00, x1: 14,   x2: 8,   x3: 5,   x4: 12,   gap: "1.71%" },
-  { scenario: "Cota Superior", obj: 4812.00, x1: "—",  x2: "—", x3: "—", x4: "—",  gap: "1.52%" },
-];
-const branchProgress = [
-  { iter: 1, bound: 4820.40, incumbent: 0,       nodes: 1  },
-  { iter: 2, bound: 4810.20, incumbent: 4680.00, nodes: 4  },
-  { iter: 3, bound: 4798.50, incumbent: 4710.00, nodes: 9  },
-  { iter: 4, bound: 4780.10, incumbent: 4730.00, nodes: 16 },
-  { iter: 5, bound: 4760.00, incumbent: 4740.00, nodes: 23 },
-  { iter: 6, bound: 4740.00, incumbent: 4740.00, nodes: 27 },
-];
-
-const dpStages = [
-  { stage: "Período 1", state: "Inicio", decision: "Ordenar 200 unidades", value: 0,     cumCost: 0      },
-  { stage: "Período 2", state: "s=200",  decision: "Ordenar 0 unidades",   value: 480,   cumCost: 1200   },
-  { stage: "Período 3", state: "s=80",   decision: "Ordenar 150 unidades", value: 1040,  cumCost: 2640   },
-  { stage: "Período 4", state: "s=130",  decision: "Ordenar 0 unidades",   value: 1560,  cumCost: 3900   },
-  { stage: "Período 5", state: "s=30",   decision: "Ordenar 200 unidades", value: 2080,  cumCost: 5200   },
-  { stage: "Período 6", state: "s=180",  decision: "Ordenar 0 unidades",   value: 2480,  cumCost: 6200   },
-];
-const dpValueFn = [
-  { state: 0,   v1: 0,    v2: 480,  v3: 820  },
-  { state: 50,  v1: 120,  v2: 540,  v3: 880  },
-  { state: 100, v1: 240,  v2: 610,  v3: 950  },
-  { state: 150, v1: 360,  v2: 690,  v3: 1020 },
-  { state: 200, v1: 480,  v2: 780,  v3: 1100 },
-];
-
-const inventoryData = [
-  { sku: "TL-A0041", desc: "Bomba Hidráulica",     abc: "A", qty: 142,  reorder: 200, eoq: 380, safety: 60,  leadTime: "7d",  status: "Reordenar", velocity: 28.4 },
-  { sku: "TL-B0128", desc: "Módulo Control 5X",    abc: "A", qty: 516,  reorder: 300, eoq: 520, safety: 80,  leadTime: "14d", status: "OK",        velocity: 21.1 },
-  { sku: "TL-B0219", desc: "Arreglo Sensores v2",  abc: "B", qty: 88,   reorder: 150, eoq: 240, safety: 40,  leadTime: "10d", status: "Crítico",   velocity: 14.8 },
-  { sku: "TL-C0334", desc: "Juego Empaques 12mm",  abc: "B", qty: 1240, reorder: 500, eoq: 900, safety: 120, leadTime: "5d",  status: "OK",        velocity: 9.2  },
-  { sku: "TL-C0481", desc: "Unidad Rodamiento 3B", abc: "B", qty: 324,  reorder: 200, eoq: 340, safety: 50,  leadTime: "8d",  status: "OK",        velocity: 7.6  },
-  { sku: "TL-D0512", desc: "Arnés de Cables L4",   abc: "C", qty: 67,   reorder: 80,  eoq: 140, safety: 25,  leadTime: "12d", status: "Reordenar", velocity: 3.4  },
-  { sku: "TL-D0698", desc: "Paquete Sujetadores",  abc: "C", qty: 2890, reorder: 500, eoq: 800, safety: 100, leadTime: "3d",  status: "Exceso",    velocity: 2.1  },
-];
-const stockChart = [
-  { day: "Lun", TLA: 142, TLB: 516, TLC: 88  },
-  { day: "Mar", TLA: 114, TLB: 495, TLC: 71  },
-  { day: "Mié", TLA: 86,  TLB: 474, TLC: 54  },
-  { day: "Jue", TLA: 200, TLB: 453, TLC: 37  },
-  { day: "Vie", TLA: 172, TLB: 432, TLC: 150 },
-  { day: "Sáb", TLA: 144, TLB: 411, TLC: 122 },
-  { day: "Dom", TLA: 116, TLB: 390, TLC: 94  },
-];
-
-const kpiData = [
-  { label: "Envíos Totales",     value: "12,847",  delta: "+8.3%",  up: true,  sub: "Este mes" },
-  { label: "Entregas A Tiempo",  value: "94.7%",   delta: "+1.2pp", up: true,  sub: "vs. mes anterior" },
-  { label: "Costo Transp. Prom.",value: "$18.42",  delta: "-3.1%",  up: true,  sub: "por unidad" },
-  { label: "Utilización Flota",  value: "79.1%",   delta: "-0.8pp", up: false, sub: "rutas activas" },
-  { label: "Tasa de Relleno",    value: "88.4%",   delta: "+2.4pp", up: true,  sub: "cumplimiento" },
-  { label: "Ingresos Netos",     value: "$3.28M",  delta: "+11.2%", up: true,  sub: "acumulado YTD" },
-];
-
-const activityLog = [
-  { time: "09:42", event: "Ruta RT-2841 optimizada — ahorro de $1,240", type: "success" },
-  { time: "09:38", event: "Alerta inventario: TL-A0041 debajo del punto de reorden", type: "warning" },
-  { time: "09:31", event: "LP solver completado — Z = $24,680 (óptimo)", type: "success" },
-  { time: "09:17", event: "Plan de transporte actualizado por revisión de demanda Q3", type: "info" },
-  { time: "08:55", event: "Restricción de capacidad en Nodo 4 activa — 100% uso", type: "warning" },
-  { time: "08:40", event: "MIP Branch & Bound convergido — gap 1.71%", type: "success" },
-  { time: "08:22", event: "Prog. Dinámica resuelta — 6 períodos, costo total $6,200", type: "success" },
-];
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
 
 function ChartTooltip({ active, payload, label, dark }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className={`rounded border px-3 py-2 text-xs shadow-lg ${dark ? "bg-[#0C0C10] border-white/10 text-[#E2E8F0]" : "bg-white border-black/8 text-[#0D1B2A]"}`}>
+    <div className={`rounded border px-3 py-2 text-xs shadow-lg ${dark ? "bg-[#1C1F26] border-white/10 text-[#E2E8F0]" : "bg-white border-black/8 text-[#0D1B2A]"}`}>
       {label && <p className="text-[10px] font-mono mb-1.5 opacity-60">{label}</p>}
       {payload.map((p: any) => (
         <p key={p.name} className="flex items-center gap-2">
@@ -209,6 +87,38 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
       {children}
     </div>
   );
+}
+
+function EmptyState({ dark, title, sub }: { dark: boolean; title: string; sub: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="flex flex-col items-center justify-center py-16 px-6 text-center gap-2"
+    >
+      <div className="w-12 h-12 rounded-full flex items-center justify-center mb-2"
+        style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}>
+        <Terminal size={20} className="text-muted-foreground" />
+      </div>
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="text-xs text-muted-foreground max-w-sm">{sub}</p>
+    </motion.div>
+  );
+}
+
+// Formatea un conjunto de coeficientes {nombre: coef} como expresión lineal legible, ej. "5x1 - 2x2".
+function formatLinearExpr(terms?: Record<string, number>): string {
+  if (!terms) return "";
+  const entries = Object.entries(terms).filter(([, c]) => c !== 0);
+  if (entries.length === 0) return "0";
+  return entries.map(([name, coef], i) => {
+    const sign = coef < 0 ? "-" : "+";
+    const abs = Math.abs(coef);
+    const coefStr = abs === 1 ? "" : `${abs}`;
+    if (i === 0) return coef < 0 ? `-${coefStr}${name}` : `${coefStr}${name}`;
+    return ` ${sign} ${coefStr}${name}`;
+  }).join("");
 }
 
 function SectionHeader({ title, sub, actions }: { title: string; sub?: string; actions?: React.ReactNode }) {
@@ -506,93 +416,104 @@ function LogisticsMap({ dark, routes, defaultCenter = [-1.8312, -78.1834], defau
 
 // ─── Module Views ─────────────────────────────────────────────────────────────
 
-function OverviewView({ dark }: { dark: boolean }) {
+const AUDIT_TYPE_LABELS: Record<string, string> = {
+  solver_lp: "Resolución: Programación Lineal",
+  solver_transport: "Resolución: Transporte",
+  solver_networks: "Resolución: Redes",
+  solver_dynamic: "Resolución: Programación Dinámica",
+  solver_inventories: "Resolución: Inventarios",
+  groq_tutor: "IA: explicación de resultados",
+  groq_tutor_interpret: "IA: interpretación de enunciado",
+  groq_tutor_validate: "IA: validación independiente",
+  groq_tutor_socratic: "IA: guía socrática",
+};
+
+function OverviewView({ dark, dbModels }: { dark: boolean; dbModels: any[] }) {
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch("http://localhost:4000/api/audit/logs")
+      .then(r => r.json())
+      .then(d => { if (d.status === "success" && Array.isArray(d.data)) setRecentLogs(d.data.slice(-8).reverse()); })
+      .catch(() => {});
+  }, []);
+
+  const resolvedCount = dbModels.filter(m => m.solutions?.length > 0).length;
+  const totalCount = dbModels.length;
+
+  const moduleStatusCards = MODULES.filter(m => m.id !== "overview").map(m => {
+    const model = dbModels.find(dm => dm.type.toUpperCase() === MODULE_TO_DB_TYPE[m.id]);
+    const solution = model?.solutions?.[0];
+    return { ...m, hasSolution: !!solution, objectiveValue: solution?.objectiveValue, status: solution?.status };
+  });
+
   return (
     <div className="flex flex-col gap-4">
-      {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        {kpiData.map(k => (
-          <Card key={k.label} className="px-4 py-3">
-            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2">{k.label}</p>
-            <p className="text-xl font-semibold text-foreground leading-none">{k.value}</p>
-            <div className="flex items-center gap-1 mt-2">
-              {k.up ? <ArrowUpRight size={12} className="text-emerald-500" /> : <ArrowDownRight size={12} className="text-red-500" />}
-              <span className={`text-[11px] font-mono font-medium ${k.up ? "text-emerald-600" : "text-red-500"}`}>{k.delta}</span>
-              <span className="text-[11px] text-muted-foreground">{k.sub}</span>
-            </div>
-          </Card>
-        ))}
+      {/* KPI row — derivado de los modelos reales, no simulado */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="px-4 py-3">
+          <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Módulos Resueltos</p>
+          <p className="text-xl font-semibold text-foreground leading-none">{resolvedCount} / {totalCount}</p>
+          <p className="text-[11px] text-muted-foreground mt-2">de los 6 capítulos de IO</p>
+        </Card>
+        <Card className="px-4 py-3">
+          <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Interacciones IA</p>
+          <p className="text-xl font-semibold text-foreground leading-none">{recentLogs.length > 0 ? recentLogs.length : "—"}</p>
+          <p className="text-[11px] text-muted-foreground mt-2">más recientes registradas</p>
+        </Card>
+        <Card className="px-4 py-3 col-span-2 md:col-span-2">
+          <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Estado del tutor</p>
+          <div className="flex items-center gap-1.5 mt-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-sm font-semibold text-foreground">Resolutor + Validador activos</span>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1">Modo directo y modo socrático disponibles en el chat</p>
+        </Card>
       </div>
 
-      {/* Map */}
       <Card>
-        <SectionHeader title="Global Logistics Network"
-          sub="14 hubs · 13 active routes · 247 vehicles tracked"
-          actions={<>
-            <IconBtn icon={RefreshCw} title="Refresh" />
-            <IconBtn icon={Download} title="Export" />
-          </>}
-        />
+        <SectionHeader title="Estado de los módulos" sub="Resumen de los 6 capítulos de Investigación Operativa" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4">
+          {moduleStatusCards.map(m => {
+            const Icon = m.icon;
+            return (
+              <div key={m.id} className={`rounded-lg border p-3 ${m.hasSolution ? (dark ? "border-emerald-500/30 bg-emerald-500/5" : "border-emerald-700/20 bg-emerald-50") : "border-border bg-secondary/20"}`}>
+                <div className="flex items-center gap-2">
+                  <Icon size={14} className="text-primary" />
+                  <span className="text-xs font-medium text-foreground">{m.label}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-2">
+                  {m.hasSolution ? `Resuelto · Z = ${typeof m.objectiveValue === "number" ? m.objectiveValue.toLocaleString() : "—"}` : "Sin resolver todavía"}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionHeader title="Mapa de Referencia" sub="Vista geográfica de apoyo para los módulos de Transporte y Redes" />
         <div className="p-4">
           <LogisticsMap dark={dark} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
         </div>
       </Card>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <Card className="xl:col-span-2">
-          <SectionHeader title="Shipment Volume & Revenue" sub="8-month rolling · USD thousands" />
-          <div className="p-4">
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={shipmentTrend} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gVol" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={dark ? "#3B82F6" : "#1345A8"} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={dark ? "#3B82F6" : "#1345A8"} stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={dark ? "#0EA5E9" : "#0369A1"} stopOpacity={0.25} />
-                    <stop offset="100%" stopColor={dark ? "#0EA5E9" : "#0369A1"} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
-                <XAxis dataKey="month" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTooltip dark={dark} />} />
-                <Area type="monotone" dataKey="volume" name="Volume" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} fill="url(#gVol)" dot={false} />
-                <Area type="monotone" dataKey="revenue" name="Revenue ($k)" stroke={dark ? "#0EA5E9" : "#0369A1"} strokeWidth={1.5} fill="url(#gRev)" dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card>
-          <SectionHeader title="Performance Index" sub="Multi-dimensional KPI radar" />
-          <div className="p-4">
-            <ResponsiveContainer width="100%" height={200}>
-              <RadarChart data={perfRadar}>
-                <PolarGrid stroke={dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"} />
-                <PolarAngleAxis dataKey="metric" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} />
-                <Radar dataKey="score" stroke={dark ? "#3B82F6" : "#1345A8"} fill={dark ? "#3B82F6" : "#1345A8"} fillOpacity={0.2} strokeWidth={1.5} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
-
-      {/* Activity log */}
       <Card>
-        <SectionHeader title="System Activity Log" sub="Real-time operations events"
-          actions={<Badge label="LIVE" variant="success" />}
+        <SectionHeader title="Actividad Reciente" sub="Últimas interacciones registradas (resolver + IA)"
+          actions={<Badge label={recentLogs.length > 0 ? "EN VIVO" : "SIN DATOS"} variant={recentLogs.length > 0 ? "success" : "default"} />}
         />
         <div className="divide-y divide-border">
-          {activityLog.map((item, i) => (
-            <div key={i} className="flex items-start gap-3 px-5 py-2.5 hover:bg-secondary/40 transition-colors">
-              {item.type === "success" && <CheckCircle2 size={13} className="text-emerald-500 mt-0.5 shrink-0" />}
-              {item.type === "warning" && <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />}
-              {item.type === "info"    && <Info size={13} className="text-blue-500 mt-0.5 shrink-0" />}
-              <span className="text-[11px] font-mono text-muted-foreground shrink-0 w-10">{item.time}</span>
-              <span className="text-xs text-foreground">{item.event}</span>
+          {recentLogs.length === 0 ? (
+            <div className="px-5 py-6 text-xs text-muted-foreground text-center">
+              Aún no hay actividad registrada. Resuelve un modelo o habla con el tutor para ver el historial aquí.
+            </div>
+          ) : recentLogs.map((log: any, i: number) => (
+            <div key={log.id ?? i} className="flex items-start gap-3 px-5 py-2.5 hover:bg-secondary/40 transition-colors">
+              {log.type?.startsWith("groq") ? <Brain size={13} className="text-blue-500 mt-0.5 shrink-0" /> : <CheckCircle2 size={13} className="text-emerald-500 mt-0.5 shrink-0" />}
+              <span className="text-[11px] font-mono text-muted-foreground shrink-0 w-14">
+                {log.timestamp ? new Date(log.timestamp).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }) : "—"}
+              </span>
+              <span className="text-xs text-foreground">{AUDIT_TYPE_LABELS[log.type] ?? log.type}</span>
             </div>
           ))}
         </div>
@@ -603,63 +524,92 @@ function OverviewView({ dark }: { dark: boolean }) {
 
 function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const problem = modelData?.data;
 
-  const displaySolution = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
-    variable: v.name === 'x1' ? 'x₁ (Product A)' : v.name === 'x2' ? 'x₂ (Product B)' : v.name === 'x3' ? 'x₃ (Product C)' : v.name,
+  if (!activeSolution) {
+    return (
+      <Card>
+        <EmptyState
+          dark={dark}
+          title="Este modelo aún no se ha resuelto"
+          sub={'Ajusta los parámetros en "Editar Datos" y dale clic a "Resolver" (o pídeselo al Tutor por chat) para ver la solución óptima, el análisis de sensibilidad y el detalle paso a paso.'}
+        />
+      </Card>
+    );
+  }
+
+  const displaySolution = Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
+    variable: v.name,
     value: v.value,
     reducedCost: v.reduced_cost ?? v.reducedCost ?? 0.0,
     lower: v.lower ?? "—",
     upper: v.upper ?? "—"
-  })) : lpSolution;
+  })) : [];
 
-  const displayConstraints = activeSolution && Array.isArray(activeSolution.constraints) ? activeSolution.constraints.map((c: any) => ({
-    name: c.name.replace(/_/g, ' '),
-    slack: c.slack,
-    shadowPrice: c.shadow_price ?? c.shadowPrice ?? 0.0,
-    rhsLow: c.rhsLow ?? "—",
-    rhsHigh: c.rhsHigh ?? "—"
-  })) : lpConstraints;
+  const displayConstraints = Array.isArray(activeSolution.constraints) ? activeSolution.constraints.map((c: any) => {
+    const original = problem?.constraints?.find((pc: any) => pc.name === c.name);
+    return {
+      name: c.name.replace(/_/g, ' '),
+      slack: c.slack,
+      shadowPrice: c.shadow_price ?? c.shadowPrice ?? 0.0,
+      rhsLow: c.rhsLow ?? "—",
+      rhsHigh: c.rhsHigh ?? "—",
+      rhs: original?.rhs,
+      coefficients: original?.coefficients,
+      operator: original?.operator,
+    };
+  }) : [];
 
-  const objVal = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 24.68;
+  const objVal = activeSolution.objectiveValue ?? 0;
+  const objectiveTerms = problem?.variables ? Object.fromEntries(problem.variables.map((v: any) => [v.name, v.objCoef])) : undefined;
+
+  const sensChartData = displayConstraints.filter(
+    (c: any) => typeof c.rhsLow === "number" && typeof c.rhsHigh === "number" && typeof c.rhs === "number"
+  ).map((c: any) => ({ constraint: c.name, current: c.rhs, lower: c.rhsLow, upper: c.rhsHigh }));
 
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <SectionHeader title="Problem Formulation" sub="Maximize Z = 5x₁ + 4x₂ + 3x₃ (weekly profit in $000s)" />
-        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[
-            { name: "Labor Hours", expr: "6x₁ + 4x₂ + 2x₃ ≤ 240", util: activeSolution ? (displayConstraints[0]?.slack === 0 ? "100%" : "91.2%") : "100%", binding: activeSolution ? displayConstraints[0]?.slack === 0 : true },
-            { name: "Raw Material", expr: "3x₁ + 2x₂ + 5x₃ ≤ 270", util: activeSolution ? (displayConstraints[1]?.slack === 0 ? "100%" : "95.4%") : "95.4%", binding: activeSolution ? displayConstraints[1]?.slack === 0 : false },
-            { name: "Machine Hours", expr: "5x₁ + 6x₂ + 5x₃ ≤ 420", util: activeSolution ? (displayConstraints[2]?.slack === 0 ? "100%" : "92.5%") : "100%", binding: activeSolution ? displayConstraints[2]?.slack === 0 : true },
-          ].map(c => (
-            <div key={c.name} className={`rounded-lg border p-3 ${c.binding ? (dark ? "border-blue-500/30 bg-blue-500/5" : "border-blue-700/20 bg-blue-50") : "border-border bg-secondary/30"}`}>
-              <p className="text-[10px] font-mono text-muted-foreground">{c.name}</p>
-              <p className="text-sm font-mono font-medium text-foreground mt-1">{c.expr}</p>
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-[10px] text-muted-foreground">Utilization</span>
-                <span className={`text-[10px] font-mono font-semibold ${c.binding ? "text-amber-500" : "text-emerald-500"}`}>{c.util}</span>
+      {problem?.variables && problem?.constraints && (
+        <Card>
+          <SectionHeader
+            title="Formulación del problema"
+            sub={`${problem.objective === "minimize" ? "Minimizar" : "Maximizar"} Z = ${formatLinearExpr(objectiveTerms)}`}
+          />
+          <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {displayConstraints.map((c: any) => (
+              <div key={c.name} className={`rounded-lg border p-3 ${c.slack === 0 ? (dark ? "border-blue-500/30 bg-blue-500/5" : "border-blue-700/20 bg-blue-50") : "border-border bg-secondary/30"}`}>
+                <p className="text-[10px] font-mono text-muted-foreground">{c.name}</p>
+                <p className="text-sm font-mono font-medium text-foreground mt-1">
+                  {c.coefficients ? `${formatLinearExpr(c.coefficients)} ${c.operator} ${c.rhs}` : "—"}
+                </p>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-[10px] text-muted-foreground">Estado</span>
+                  <span className={`text-[10px] font-mono font-semibold ${c.slack === 0 ? "text-amber-500" : "text-emerald-500"}`}>
+                    {c.slack === 0 ? "Activa (sin holgura)" : `Holgura: ${c.slack.toFixed(2)}`}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </Card>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Card>
-          <SectionHeader title="Optimal Solution" sub={`Simplex — Phase II complete · Z* = $${(objVal * 1000).toLocaleString()}`}
-            actions={<Badge label="OPTIMAL" variant="success" />}
+          <SectionHeader title="Solución óptima" sub={`${activeSolution.method_used ?? "Solver"} · Z* = ${objVal.toLocaleString()}`}
+            actions={<Badge label={activeSolution.status === "Optimal" ? "ÓPTIMO" : activeSolution.status} variant={activeSolution.status === "Optimal" ? "success" : "warning"} />}
           />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  {["Variable", "Value", "Reduced Cost", "Lower Bound", "Upper Bound"].map(h => (
+                  {["Variable", "Valor", "Costo Reducido", "Cota Inf.", "Cota Sup."].map(h => (
                     <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {displaySolution.map(r => (
+                {displaySolution.map((r: any) => (
                   <tr key={r.variable} className="hover:bg-secondary/30 transition-colors">
                     <td className="px-5 py-3 font-mono text-primary">{r.variable}</td>
                     <td className="px-5 py-3 font-semibold text-foreground font-mono">{r.value.toFixed(2)}</td>
@@ -674,22 +624,22 @@ function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
         </Card>
 
         <Card>
-          <SectionHeader title="Sensitivity Analysis" sub="Dual values & RHS ranging" />
+          <SectionHeader title="Análisis de sensibilidad" sub="Precios sombra y rangos de RHS" />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  {["Constraint", "Slack", "Shadow Price", "RHS Low", "RHS High"].map(h => (
+                  {["Restricción", "Holgura", "Precio Sombra", "RHS Mín.", "RHS Máx."].map(h => (
                     <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {displayConstraints.map(r => (
+                {displayConstraints.map((r: any) => (
                   <tr key={r.name} className="hover:bg-secondary/30 transition-colors">
                     <td className="px-5 py-3 text-foreground">{r.name}</td>
                     <td className={`px-5 py-3 font-mono ${r.slack === 0 ? "text-amber-500 font-semibold" : "text-emerald-600"}`}>{r.slack.toFixed(2)}</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-primary">${r.shadowPrice.toFixed(3)}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-primary">{r.shadowPrice.toFixed(3)}</td>
                     <td className="px-5 py-3 font-mono text-muted-foreground">{r.rhsLow}</td>
                     <td className="px-5 py-3 font-mono text-muted-foreground">{r.rhsHigh}</td>
                   </tr>
@@ -697,48 +647,60 @@ function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
               </tbody>
             </table>
           </div>
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-mono text-muted-foreground mb-3 uppercase tracking-widest">RHS Ranging — Current vs. Feasible Range</p>
-            <ResponsiveContainer width="100%" height={120}>
-              <BarChart data={lpSensChart} layout="vertical" margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
-                <XAxis type="number" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="constraint" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} width={60} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTooltip dark={dark} />} />
-                <Bar dataKey="lower" name="Lower" fill={dark ? "rgba(59,130,246,0.2)" : "rgba(19,69,168,0.1)"} radius={[2,0,0,2]} />
-                <Bar dataKey="current" name="Current" fill={dark ? "#3B82F6" : "#1345A8"} radius={0} />
-                <Bar dataKey="upper" name="Upper" fill={dark ? "rgba(14,165,233,0.3)" : "rgba(3,105,161,0.15)"} radius={[0,2,2,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {sensChartData.length > 0 && (
+            <div className="px-5 py-4">
+              <p className="text-[10px] font-mono text-muted-foreground mb-3 uppercase tracking-widest">Rango RHS — Actual vs. Factible</p>
+              <ResponsiveContainer width="100%" height={Math.max(80, sensChartData.length * 40)}>
+                <BarChart data={sensChartData} layout="vertical" margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="constraint" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} width={60} axisLine={false} tickLine={false} />
+                  <Tooltip content={<ChartTooltip dark={dark} />} />
+                  <Bar dataKey="lower" name="Mínimo" fill={dark ? "rgba(59,130,246,0.2)" : "rgba(19,69,168,0.1)"} radius={[2,0,0,2]} />
+                  <Bar dataKey="current" name="Actual" fill={dark ? "#3B82F6" : "#1345A8"} radius={0} />
+                  <Bar dataKey="upper" name="Máximo" fill={dark ? "rgba(14,165,233,0.3)" : "rgba(3,105,161,0.15)"} radius={[0,2,2,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Card>
       </div>
+
+      {activeSolution?.steps ? (
+        <AlgorithmSteps
+          steps={activeSolution.steps}
+          dark={dark}
+          heading={activeSolution.method_used ? `Detalle paso a paso — ${activeSolution.method_used}` : "Detalle paso a paso"}
+        />
+      ) : activeSolution?.steps_note ? (
+        <p className="text-xs font-mono text-muted-foreground px-1">{activeSolution.steps_note}</p>
+      ) : null}
     </div>
   );
 }
 
 function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const problem = modelData?.data;
+
+  const maxUnits = activeSolution && Array.isArray(activeSolution.variables)
+    ? Math.max(...activeSolution.variables.map((v: any) => v.units), 1) : 1;
 
   const displayPlan = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
     route: `${v.origin.replace(/_/g, ' ')} → ${v.destination.replace(/_/g, ' ')}`,
     units: v.units,
     cost: v.cost,
-    pct: Math.round((v.units / 240) * 100),
-    status: "Optimal"
-  })) : transportPlan;
+    pct: Math.round((v.units / maxUnits) * 100),
+    status: "Óptimo"
+  })) : [];
 
-  const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 8440;
+  const totalCost = activeSolution?.objectiveValue ?? 0;
 
   const mapRoutes = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
     from: v.origin,
     to: v.destination,
     units: v.units,
     active: v.units > 0
-  })) : [
-    { from: "Seattle", to: "Denver", units: 240, active: true },
-    { from: "Chicago", to: "Chicago", units: 100, active: false },
-    { from: "New York", to: "New York", units: 100, active: false },
-  ];
+  })) : [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -750,330 +712,427 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
       </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card>
-          <SectionHeader title="Cost Matrix ($/unit)" sub="Transportation tableau — Northwest corner initialized" />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground">Origin \ Dest.</th>
-                  {["Denver", "Chicago", "Miami", "New York", "Supply"].map(h => (
-                    <th key={h} className="text-center px-3 py-2.5 text-[10px] font-mono text-muted-foreground">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {costMatrix.map((row, i) => (
-                  <tr key={i} className={`${i === 3 ? "border-t-2 border-border bg-secondary/20" : "hover:bg-secondary/30"} transition-colors`}>
-                    <td className="px-5 py-3 font-mono text-foreground text-[11px]">{row.origin}</td>
-                    {[row.denver, row.chicago, row.miami, row.newYork].map((v, j) => (
-                      <td key={j} className={`text-center px-3 py-3 font-mono font-semibold text-[11px] ${i === 3 ? "text-primary" : "text-foreground"}`}>
-                        {i < 3 ? `$${v}` : v}
-                      </td>
+        {problem?.origins && problem?.destinations && problem?.costs ? (
+          <Card>
+            <SectionHeader title="Tabla de costos ($/unidad)" sub={`Balanceado: ${(problem.supply?.reduce((a: number, b: number) => a + b, 0) === problem.demand?.reduce((a: number, b: number) => a + b, 0)) ? "sí" : "no"}`} />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground">Origen \ Destino</th>
+                    {problem.destinations.map((d: string) => (
+                      <th key={d} className="text-center px-3 py-2.5 text-[10px] font-mono text-muted-foreground">{d}</th>
                     ))}
-                    <td className={`text-center px-3 py-3 font-mono font-bold text-[11px] ${i < 3 ? "text-primary" : "text-muted-foreground"}`}>
-                      {row.supply !== null ? row.supply : "—"}
-                    </td>
+                    <th className="text-center px-3 py-2.5 text-[10px] font-mono text-muted-foreground">Oferta</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {problem.origins.map((o: string, i: number) => (
+                    <tr key={o} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-5 py-3 font-mono text-foreground text-[11px]">{o}</td>
+                      {problem.costs[i]?.map((v: number, j: number) => (
+                        <td key={j} className="text-center px-3 py-3 font-mono font-semibold text-[11px] text-foreground">${v}</td>
+                      ))}
+                      <td className="text-center px-3 py-3 font-mono font-bold text-[11px] text-primary">{problem.supply?.[i] ?? "—"}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t-2 border-border bg-secondary/20">
+                    <td className="px-5 py-3 font-mono text-foreground text-[11px]">Demanda</td>
+                    {problem.demand?.map((v: number, j: number) => (
+                      <td key={j} className="text-center px-3 py-3 font-mono font-bold text-[11px] text-primary">{v}</td>
+                    ))}
+                    <td className="px-3 py-3" />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ) : (
+          <Card><EmptyState dark={dark} title="Sin datos del problema" sub="Edita los orígenes, destinos, oferta, demanda y costos en el editor del módulo." /></Card>
+        )}
 
+        {activeSolution ? (
+          <Card>
+            <SectionHeader title="Plan de transporte óptimo" sub={`Costo total: ${totalCost.toLocaleString()} · ${displayPlan.length} rutas activas`}
+              actions={<Badge label={activeSolution.status === "Optimal" ? "ÓPTIMO" : activeSolution.status} variant={activeSolution.status === "Optimal" ? "success" : "warning"} />}
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Ruta", "Unidades", "Costo", "Utilización", "Estado"].map(h => (
+                      <th key={h} className="text-left px-4 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {displayPlan.map((r: any) => (
+                    <tr key={r.route} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-4 py-3 font-mono text-[11px] text-foreground">{r.route}</td>
+                      <td className="px-4 py-3 font-mono text-foreground">{r.units}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-primary">${r.cost.toLocaleString()}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-14 h-1 rounded-full bg-secondary overflow-hidden">
+                             <div className="h-full rounded-full" style={{ width: `${r.pct}%`, background: dark ? "#3B82F6" : "#1345A8" }} />
+                          </div>
+                          <span className="font-mono text-[10px] text-muted-foreground">{r.pct}%</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge label={r.status} variant="success" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ) : (
+          <Card><EmptyState dark={dark} title="Aún no se ha resuelto" sub='Dale clic a "Resolver" para calcular el plan óptimo de transporte.' /></Card>
+        )}
+      </div>
+
+      {Array.isArray(activeSolution?.comparisons) && activeSolution.comparisons.length > 0 && (
         <Card>
-          <SectionHeader title="Optimal Transport Plan" sub={`Total cost: $${totalCost.toLocaleString()} · ${displayPlan.length} active routes`}
-            actions={<Badge label="OPTIMAL" variant="success" />}
+          <SectionHeader
+            title="Comparación de métodos de solución inicial"
+            sub={`Se usó ${activeSolution.initial_method_used ?? '—'} como punto de partida para MODI`}
           />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  {["Route", "Units", "Cost", "Utilization", "Status"].map(h => (
-                    <th key={h} className="text-left px-4 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  {["Método", "Costo inicial"].map(h => (
+                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {displayPlan.map(r => (
-                  <tr key={r.route} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-[11px] text-foreground">{r.route}</td>
-                    <td className="px-4 py-3 font-mono text-foreground">{r.units}</td>
-                    <td className="px-4 py-3 font-mono font-semibold text-primary">${r.cost.toLocaleString()}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-14 h-1 rounded-full bg-secondary overflow-hidden">
-                           <div className="h-full rounded-full" style={{ width: `${r.pct}%`, background: dark ? "#3B82F6" : "#1345A8" }} />
-                        </div>
-                        <span className="font-mono text-[10px] text-muted-foreground">{r.pct}%</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge label={r.status} variant={r.status === "Optimal" ? "success" : "warning"} />
-                    </td>
+                {activeSolution.comparisons.map((c: any) => (
+                  <tr key={c.method} className="hover:bg-secondary/30 transition-colors">
+                    <td className="px-5 py-3 font-mono text-foreground">{c.method}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-primary">${c.total_cost.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </Card>
-      </div>
+      )}
+
+      {activeSolution?.steps ? (
+        <AlgorithmSteps
+          steps={activeSolution.steps}
+          dark={dark}
+          heading="Optimización MODI — de la solución inicial al óptimo"
+        />
+      ) : activeSolution?.steps_note ? (
+        <p className="text-xs font-mono text-muted-foreground px-1">{activeSolution.steps_note}</p>
+      ) : null}
     </div>
   );
 }
 
 function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const algorithm = activeSolution?.algorithm;
+  const result = activeSolution?.result;
 
-  const displayNodes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
-    Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
-      node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
-      type: "Active Arc",
-      flow_in: flow,
-      flow_out: flow,
-      excess: flow > 0 ? flow : 0
-    }))
-  ) : null;
+  if (!activeSolution || !result) {
+    return (
+      <Card>
+        <EmptyState
+          dark={dark}
+          title="Aún no se ha resuelto"
+          sub='Elige un algoritmo (ruta más corta, árbol de expansión mínima, flujo máximo o flujo de costo mínimo) en el editor y dale clic a "Resolver".'
+        />
+      </Card>
+    );
+  }
 
-  const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 6820;
-
-  const mapRoutes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
-    Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
-      from: src,
-      to: tgt,
-      units: flow,
-      active: flow > 0
-    }))
-  ) : [
-    { from: "Node_1", to: "Node_3", units: 150, active: true },
-    { from: "Node_1", to: "Node_4", units: 50, active: true },
-    { from: "Node_2", to: "Node_3", units: 100, active: true },
-    { from: "Node_2", to: "Node_4", units: 50, active: true },
-    { from: "Node_3", to: "Node_5", units: 200, active: true },
-    { from: "Node_4", to: "Node_5", units: 150, active: true },
-  ];
+  let mapRoutes: { from: string; to: string; units: number; active: boolean }[] = [];
+  if (algorithm === "shortest_path" && Array.isArray(result.path)) {
+    mapRoutes = result.path.slice(0, -1).map((n: string, i: number) => ({ from: n, to: result.path[i + 1], units: 1, active: true }));
+  } else if (algorithm === "min_spanning_tree" && Array.isArray(result.edges)) {
+    mapRoutes = result.edges.map((e: any) => ({ from: e.source, to: e.target, units: e.weight, active: true }));
+  } else if (result.flows) {
+    mapRoutes = Object.entries(result.flows).flatMap(([src, targets]: [string, any]) =>
+      Object.entries(targets).filter(([, f]) => (f as number) > 0).map(([tgt, f]) => ({ from: src, to: tgt, units: f as number, active: true }))
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <SectionHeader title="Mapa Real de Flujo de Redes" sub="Visualización interactiva de nodos y arcos con flujos óptimos calculados" />
+        <SectionHeader title="Mapa Real de la Red" sub="Visualización de nodos y arcos con el resultado calculado" />
         <div className="p-4">
           <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card>
-          <SectionHeader title="Node Flow Analysis" sub={`Min-cost flow · total flow: 350 units · total cost: $${totalCost.toLocaleString()}`} />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Arc / Route", "Type", "Flow In", "Flow Out", "Flow Amount"].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {displayNodes ? displayNodes.map((r, i) => (
-                  <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
-                    <td className="px-5 py-3">
-                      <Badge label={r.type} variant="info" />
-                    </td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_in}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_out}</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-emerald-600">
-                      {r.excess}
-                    </td>
-                  </tr>
-                )) : networkNodes.map(r => (
-                  <tr key={r.node} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
-                    <td className="px-5 py-3">
-                      <Badge label={r.type} variant={r.type === "Source" ? "info" : r.type === "Sink" ? "warning" : "default"} />
-                    </td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_in}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_out}</td>
-                    <td className={`px-5 py-3 font-mono font-semibold ${r.excess > 0 ? "text-emerald-600" : r.excess < 0 ? "text-red-500" : "text-muted-foreground"}`}>
-                      {r.excess > 0 ? `+${r.excess}` : r.excess}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+      <Card>
+        {algorithm === "shortest_path" && Array.isArray(result.path) && (
+          <>
+            <SectionHeader title="Ruta más corta" sub={`Costo total: ${result.cost}`} actions={<Badge label="ÓPTIMO" variant="success" />} />
+            <div className="p-5 flex items-center gap-2 flex-wrap">
+              {result.path.map((n: string, i: number) => (
+                <Fragment key={i}>
+                  <span className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-mono text-xs font-semibold">{n}</span>
+                  {i < result.path.length - 1 && <ChevronRight size={14} className="text-muted-foreground" />}
+                </Fragment>
+              ))}
+            </div>
+          </>
+        )}
 
-        <Card>
-          <SectionHeader title="Flow Over Time" sub="Network utilization — 6 periods" />
-          <div className="p-4">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={networkFlow} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
-                <XAxis dataKey="t" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTooltip dark={dark} />} />
-                <ReferenceLine y={200} stroke={dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)"} strokeDasharray="4 4" label={{ value: "Capacity", position: "right", fontSize: 10, fill: dark ? "#6B7280" : "#9CA3AF", fontFamily: "DM Mono" }} />
-                <Line type="monotone" dataKey="flowA" name="Arc A→B" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} dot={{ r: 3, fill: dark ? "#3B82F6" : "#1345A8" }} />
-                <Line type="monotone" dataKey="flowB" name="Arc C→D" stroke={dark ? "#0EA5E9" : "#0369A1"} strokeWidth={2} dot={{ r: 3, fill: dark ? "#0EA5E9" : "#0369A1" }} strokeDasharray="4 2" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
+        {algorithm === "min_spanning_tree" && Array.isArray(result.edges) && (
+          <>
+            <SectionHeader title="Árbol de expansión mínima" sub={`Peso total: ${result.total_weight}`} actions={<Badge label="ÓPTIMO" variant="success" />} />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Arco", "Peso"].map(h => <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {result.edges.map((e: any, i: number) => (
+                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-5 py-3 font-mono text-foreground text-[11px]">{e.source} — {e.target}</td>
+                      <td className="px-5 py-3 font-mono text-primary font-semibold">{e.weight}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {(algorithm === "max_flow" || algorithm === "min_cost_flow") && result.flows && (
+          <>
+            <SectionHeader
+              title={algorithm === "max_flow" ? "Flujo máximo" : "Flujo de costo mínimo"}
+              sub={algorithm === "max_flow" ? `Flujo total: ${result.total_flow}` : `Costo total: ${result.total_cost}`}
+              actions={<Badge label="ÓPTIMO" variant="success" />}
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Arco", "Flujo"].map(h => <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {Object.entries(result.flows).flatMap(([src, targets]: [string, any]) =>
+                    Object.entries(targets).filter(([, f]) => (f as number) > 0).map(([tgt, f]) => (
+                      <tr key={`${src}-${tgt}`} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-5 py-3 font-mono text-foreground text-[11px]">{src} → {tgt}</td>
+                        <td className="px-5 py-3 font-mono text-primary font-semibold">{f as number}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
+
+      {activeSolution?.steps ? (
+        <AlgorithmSteps steps={activeSolution.steps} dark={dark} heading="Detalle paso a paso del algoritmo" />
+      ) : activeSolution?.steps_note ? (
+        <p className="text-xs font-mono text-muted-foreground px-1">{activeSolution.steps_note}</p>
+      ) : null}
     </div>
   );
 }
 
 function DPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const problemType = modelData?.data?.problem_type;
 
-  const displayStages = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
-    stage: `Period ${v.period}`,
-    state: `s = ${v.covered_periods.length * 40} units`,
-    decision: `Order ${v.order_qty} units`,
-    value: v.order_qty > 0 ? 200 : 0,
-    cumCost: activeSolution.objectiveValue ?? 6200
-  })) : dpStages;
+  if (!activeSolution) {
+    return (
+      <Card>
+        <EmptyState dark={dark} title="Aún no se ha resuelto" sub='Define los parámetros (mochila o lote económico) y dale clic a "Resolver".' />
+      </Card>
+    );
+  }
 
-  const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 6200;
+  const optimalValue = activeSolution.objectiveValue ?? 0;
+  const decisions = Array.isArray(activeSolution.decisions) ? activeSolution.decisions
+    : Array.isArray(activeSolution.variables) ? activeSolution.variables : [];
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <Card>
+        {problemType === "lot_sizing" ? (
+          <>
+            <SectionHeader title="Política óptima por período" sub={`Costo total: ${optimalValue.toLocaleString()}`} actions={<Badge label="ÓPTIMO" variant="success" />} />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Período", "Cantidad a pedir", "Cubre períodos"].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {decisions.map((d: any, i: number) => (
+                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-5 py-3 font-mono text-primary font-medium">Período {d.period}</td>
+                      <td className="px-5 py-3 font-mono text-foreground">{d.order_qty}</td>
+                      <td className="px-5 py-3 text-foreground text-[11px]">{Array.isArray(d.covered_periods) ? d.covered_periods.join(", ") : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <>
+            <SectionHeader title="Objetos seleccionados (mochila)" sub={`Valor óptimo: ${optimalValue.toLocaleString()}`} actions={<Badge label="ÓPTIMO" variant="success" />} />
+            <div className="p-5 flex flex-wrap gap-2">
+              {decisions.length > 0 ? decisions.map((idx: number, i: number) => (
+                <span key={i} className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary font-mono text-xs font-semibold">Objeto {idx + 1}</span>
+              )) : <span className="text-xs text-muted-foreground">Ningún objeto seleccionado</span>}
+            </div>
+          </>
+        )}
+      </Card>
+
+      {activeSolution?.steps ? (
+        <AlgorithmSteps steps={activeSolution.steps} dark={dark} heading="Detalle paso a paso" />
+      ) : activeSolution?.steps_note ? (
+        <p className="text-xs font-mono text-muted-foreground px-1">{activeSolution.steps_note}</p>
+      ) : null}
+    </div>
+  );
+}
+
+const INVENTORY_FIELD_LABELS: Record<string, string> = {
+  eoq: "EOQ (cantidad óptima)",
+  reorder_point: "Punto de reorden",
+  safety_stock: "Stock de seguridad",
+  total_cost: "Costo total",
+  max_shortage: "Faltante máximo",
+  max_inventory: "Inventario máximo",
+  run_time_days: "Días de producción",
+  cycle_time_days: "Días de ciclo",
+};
+
+function InventoriesView({ dark, modelData }: { dark: boolean; modelData?: any }) {
+  const activeSolution = modelData?.solutions?.[0];
+  const calcType = modelData?.data?.calc_type;
+  const result = activeSolution?.result;
+
+  if (!activeSolution || !result) {
+    return (
+      <Card>
+        <EmptyState dark={dark} title="Aún no se ha resuelto" sub='Elige un modelo (EOQ, descuentos por cantidad, faltantes, EPQ, punto de reorden o ABC) y dale clic a "Resolver".' />
+      </Card>
+    );
+  }
+
+  const stepsBlock = activeSolution?.steps ? (
+    <AlgorithmSteps steps={activeSolution.steps} dark={dark} heading="Sustitución en la fórmula, paso a paso" />
+  ) : activeSolution?.steps_note ? (
+    <p className="text-xs font-mono text-muted-foreground px-1">{activeSolution.steps_note}</p>
+  ) : null;
+
+  if (calcType === "abc" && Array.isArray(result.classification)) {
+    return (
+      <div className="flex flex-col gap-4">
         <Card>
-          <SectionHeader title="Stage-State Optimal Policy" sub={`6-period inventory DP · total cost: $${totalCost.toLocaleString()}`} />
+          <SectionHeader title="Clasificación ABC" sub={`${result.classification.length} SKUs`} actions={<Badge label="ÓPTIMO" variant="success" />} />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  {["Stage", "State", "Decision", "Setup Value", "Cumulative Cost"].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  {["SKU", "Valor anual", "% del total", "% acumulado", "Clase"].map(h => (
+                    <th key={h} className="text-left px-4 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {displayStages.map((r, i) => (
+                {result.classification.map((r: any, i: number) => (
                   <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-primary font-medium">{r.stage}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.state}</td>
-                    <td className="px-5 py-3 text-foreground text-[11px]">{r.decision}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">${r.value.toLocaleString()}</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-primary">${r.cumCost.toLocaleString()}</td>
+                    <td className="px-4 py-3 font-mono text-primary text-[11px]">{r.sku}</td>
+                    <td className="px-4 py-3 font-mono text-foreground">{r.annual_value.toLocaleString()}</td>
+                    <td className="px-4 py-3 font-mono text-muted-foreground">{r.percentage.toFixed(1)}%</td>
+                    <td className="px-4 py-3 font-mono text-muted-foreground">{r.cum_percentage.toFixed(1)}%</td>
+                    <td className="px-4 py-3">
+                      <span className={`font-mono font-bold text-sm ${r.abc_class === "A" ? "text-primary" : r.abc_class === "B" ? (dark ? "text-sky-400" : "text-sky-700") : "text-muted-foreground"}`}>{r.abc_class}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </Card>
+        {stepsBlock}
+      </div>
+    );
+  }
 
+  if (calcType === "eoq_discounts" && Array.isArray(result.candidates)) {
+    return (
+      <div className="flex flex-col gap-4">
         <Card>
-          <SectionHeader title="Value Function Vₜ(s)" sub="Bellman optimality — 3 periods shown" />
-          <div className="p-4">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={dpValueFn} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
-                <XAxis dataKey="state" name="Inventory State" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTooltip dark={dark} />} />
-                <Line type="monotone" dataKey="v1" name="V₁(s)" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} dot={{ r: 4 }} />
-                <Line type="monotone" dataKey="v2" name="V₂(s)" stroke={dark ? "#0EA5E9" : "#0369A1"} strokeWidth={2} strokeDasharray="5 2" dot={{ r: 4 }} />
-                <Line type="monotone" dataKey="v3" name="V₃(s)" stroke={dark ? "#A78BFA" : "#7C3AED"} strokeWidth={2} strokeDasharray="3 3" dot={{ r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
+          <SectionHeader
+            title="EOQ con descuentos por cantidad"
+            sub={result.best_option ? `Mejor opción: ${result.best_option.order_qty} unidades @ $${result.best_option.unit_price}` : ""}
+            actions={<Badge label="ÓPTIMO" variant="success" />}
+          />
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Precio unitario", "Cantidad a pedir", "Costo total"].map(h => (
+                    <th key={h} className="text-left px-4 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {result.candidates.map((c: any, i: number) => {
+                  const isBest = result.best_option && c.unit_price === result.best_option.unit_price;
+                  return (
+                    <tr key={i} className={`hover:bg-secondary/30 transition-colors ${isBest ? (dark ? "bg-blue-500/5" : "bg-blue-50") : ""}`}>
+                      <td className="px-4 py-3 font-mono text-foreground">${c.unit_price}</td>
+                      <td className="px-4 py-3 font-mono text-foreground">{c.order_qty}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-primary flex items-center gap-2">
+                        ${c.total_cost.toLocaleString()} {isBest && <Badge label="MEJOR" variant="success" />}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </Card>
+        {stepsBlock}
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-function InventoriesView({ dark, modelData }: { dark: boolean; modelData?: any }) {
-  const activeSolution = modelData?.solutions?.[0];
-
-  const displayInventory = activeSolution && Array.isArray(activeSolution.variables) && activeSolution.variables[0] ? [
-    { sku: "TL-A0041 (DB)", desc: "Hydraulic Pump", abc: "A", qty: 142, reorder: Math.round(activeSolution.variables[0].reorder_point), eoq: Math.round(activeSolution.variables[0].eoq), safety: Math.round(activeSolution.variables[0].safety_stock), leadTime: "7d", status: "OK", velocity: 28.4 },
-    ...inventoryData.slice(1)
-  ] : inventoryData;
-
-  const totalCost = activeSolution && Array.isArray(activeSolution.variables) && activeSolution.variables[0] ? activeSolution.variables[0].total_cost : 18.42;
+  const numericFields = Object.entries(result).filter(([k, v]) => typeof v === "number" && INVENTORY_FIELD_LABELS[k]);
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "A-Class Items",  val: "2",    sub: "High value — 70% revenue", color: "text-primary" },
-          { label: "Avg. Days Cover",val: "18.4d", sub: "Across all SKUs",          color: "text-foreground" },
-          { label: "Reorder Alerts", val: "3",    sub: "2 critical · 1 warning",    color: "text-amber-500" },
-        ].map(s => (
-          <Card key={s.label} className="px-4 py-3">
-            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{s.label}</p>
-            <p className={`text-2xl font-semibold mt-1 ${s.color}`}>{s.val}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">{s.sub}</p>
-          </Card>
-        ))}
-      </div>
-
       <Card>
-        <SectionHeader title="SKU Inventory Register" sub={`7 SKUs · ABC classification · EOQ model · Setup cost: $${totalCost.toLocaleString()}`}
-          actions={<>
-            <IconBtn icon={Filter} /><IconBtn icon={Download} />
-          </>}
-        />
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border">
-                {["SKU", "Description", "ABC", "Qty On-Hand", "Reorder Pt.", "EOQ", "Safety Stk.", "Lead Time", "Velocity/day", "Status"].map(h => (
-                  <th key={h} className="text-left px-4 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {displayInventory.map(r => (
-                <tr key={r.sku} className="hover:bg-secondary/30 transition-colors">
-                  <td className="px-4 py-3 font-mono text-primary text-[11px]">{r.sku}</td>
-                  <td className="px-4 py-3 text-foreground">{r.desc}</td>
-                  <td className="px-4 py-3">
-                    <span className={`font-mono font-bold text-sm ${r.abc === "A" ? "text-primary" : r.abc === "B" ? (dark ? "text-sky-400" : "text-sky-700") : "text-muted-foreground"}`}>{r.abc}</span>
-                  </td>
-                  <td className={`px-4 py-3 font-mono font-semibold ${r.qty < r.reorder ? "text-red-500" : "text-foreground"}`}>{r.qty}</td>
-                  <td className="px-4 py-3 font-mono text-muted-foreground">{r.reorder}</td>
-                  <td className="px-4 py-3 font-mono text-foreground">{r.eoq}</td>
-                  <td className="px-4 py-3 font-mono text-muted-foreground">{r.safety}</td>
-                  <td className="px-4 py-3 font-mono text-muted-foreground">{r.leadTime}</td>
-                  <td className="px-4 py-3 font-mono text-foreground">{r.velocity}</td>
-                  <td className="px-4 py-3">
-                    <Badge label={r.status}
-                      variant={r.status === "Critical" ? "danger" : r.status === "Reorder" ? "warning" : r.status === "Excess" ? "info" : "success"}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <SectionHeader title="Resultado del modelo de inventario" sub={calcType ?? ""} actions={<Badge label="ÓPTIMO" variant="success" />} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-5">
+          {numericFields.map(([k, v]) => (
+            <div key={k} className="rounded-lg border border-border p-3 bg-secondary/20">
+              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{INVENTORY_FIELD_LABELS[k]}</p>
+              <p className="text-xl font-semibold text-foreground mt-1">{(v as number).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+            </div>
+          ))}
         </div>
       </Card>
-
-      <Card>
-        <SectionHeader title="Stock Level Trend" sub="7-day rolling · 3 key SKUs" />
-        <div className="p-4">
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={stockChart} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
-              <XAxis dataKey="day" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip dark={dark} />} />
-              <ReferenceLine y={200} stroke={dark ? "rgba(239,68,68,0.3)" : "rgba(220,38,38,0.2)"} strokeDasharray="4 4" />
-              <ReferenceLine y={150} stroke={dark ? "rgba(239,68,68,0.3)" : "rgba(220,38,38,0.2)"} strokeDasharray="4 4" />
-              <Line type="monotone" dataKey="TLA" name="TL-A0041" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="TLB" name="TL-B0128" stroke={dark ? "#0EA5E9" : "#0369A1"} strokeWidth={2} strokeDasharray="5 2" dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="TLC" name="TL-B0219" stroke={dark ? "#F87171" : "#DC2626"} strokeWidth={2} strokeDasharray="3 3" dot={{ r: 3 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
+      {stepsBlock}
     </div>
   );
 }
@@ -1090,11 +1149,38 @@ const MODULE_INTROS: Record<ModuleId, string> = {
   inventories: "Módulo de Inventarios. ¿Te gustaría analizar los parámetros de pedido óptimos y costos de almacenamiento?",
 };
 
-function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activeModule: ModuleId; activeModelData?: any }) {
+type ChatMessage = { role: "user" | "assistant"; text: string };
+const CHAT_HISTORY_STORAGE_KEY = "tl_chat_history_v1";
+
+function loadStoredChatHistories(): Partial<Record<ModuleId, ChatMessage[]>> {
+  try {
+    const raw = localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { dark: boolean; activeModule: ModuleId; activeModelData?: any; onModelInterpreted: (moduleType: ModuleId, data: any) => Promise<any> }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  // Historial persistido por módulo (localStorage), para no perder la conversación al cambiar
+  // de módulo o recargar la página.
+  const [allHistories, setAllHistories] = useState<Partial<Record<ModuleId, ChatMessage[]>>>(loadStoredChatHistories);
+  const messages = allHistories[activeModule] ?? [];
+  const setMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    setAllHistories(prev => {
+      const current = prev[activeModule] ?? [];
+      const next = typeof updater === "function" ? (updater as (p: ChatMessage[]) => ChatMessage[])(current) : updater;
+      return { ...prev, [activeModule]: next };
+    });
+  };
+  useEffect(() => {
+    localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(allHistories));
+  }, [allHistories]);
+
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
+  const [socraticMode, setSocraticMode] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevModule = useRef<ModuleId | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1131,56 +1217,155 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
 
   useEffect(() => {
     if (prevModule.current !== activeModule) {
-      setMessages([{ role: "assistant", text: MODULE_INTROS[activeModule] }]);
+      if (!allHistories[activeModule] || allHistories[activeModule]!.length === 0) {
+        setMessages([{ role: "assistant", text: MODULE_INTROS[activeModule] }]);
+      }
       prevModule.current = activeModule;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeModule]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing]);
 
+  const MODULE_TYPE_LABELS: Record<string, string> = {
+    lp: "Programación Lineal", ip: "Programación Entera", transport: "Transporte",
+    networks: "Redes", dp: "Programación Dinámica", inventories: "Inventarios",
+  };
+
+  const askAboutActiveModel = async (text: string, historyBeforeThis: { role: "user" | "assistant"; text: string }[]) => {
+    const solution = activeModelData?.solutions?.[0] || {};
+    const problemContext = `Active Module: ${activeModule}. Model configuration: ${JSON.stringify(activeModelData?.data || {})}`;
+
+    const response = await fetch("http://localhost:4000/api/tutor/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        problemContext,
+        mathematicalSolution: solution,
+        userMessage: text,
+        chatHistory: historyBeforeThis.map(m => ({
+          role: m.role === "assistant" ? "model" : "user",
+          text: m.text
+        }))
+      })
+    });
+    return response.json();
+  };
+
+  // Un solo botón que hace todo: interpreta el mensaje, y si es un problema nuevo, cambia de
+  // módulo, guarda y resuelve automáticamente, y narra el resultado en el chat. Si es una
+  // pregunta de seguimiento sobre el modelo ya activo, responde como el tutor de siempre.
+  // En modo socrático, en cambio, nunca resuelve directo: solo hace preguntas orientadoras.
   const send = async () => {
     const text = input.trim();
     if (!text) return;
-    const userMsg = { role: "user" as const, text };
-    setMessages(m => [...m, userMsg]);
+    const historyBeforeThis = messages;
+    setMessages(m => [...m, { role: "user", text }]);
     setInput("");
     setTyping(true);
 
-    try {
-      const solution = activeModelData?.solutions?.[0] || {};
-      const problemContext = `Active Module: ${activeModule}. Model configuration: ${JSON.stringify(activeModelData?.data || {})}`;
+    if (socraticMode) {
+      try {
+        const response = await fetch("http://localhost:4000/api/tutor/socratic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            activeModule,
+            userMessage: text,
+            chatHistory: historyBeforeThis.map(m => ({ role: m.role === "assistant" ? "model" : "user", text: m.text }))
+          })
+        });
+        const resData = await response.json();
+        setTyping(false);
+        setMessages(m => [...m, { role: "assistant", text: resData.status === "success" ? resData.reply : "No pude generar una pregunta orientadora en este momento." }]);
+      } catch (error) {
+        setTyping(false);
+        setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Tutor Socrático." }]);
+      }
+      return;
+    }
 
-      const response = await fetch("http://localhost:4000/api/tutor/ask", {
+    try {
+      const interpretRes = await fetch("http://localhost:4000/api/tutor/interpret", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          problemContext,
-          mathematicalSolution: solution,
-          userMessage: text,
-          chatHistory: messages.map(m => ({
-            role: m.role === "assistant" ? "model" : "user",
-            text: m.text
-          }))
-        })
+        body: JSON.stringify({ userMessage: text })
       });
+      const interpretData = await interpretRes.json();
 
-      const resData = await response.json();
+      if (interpretData.status === "success" && interpretData.isNewProblem && interpretData.moduleType && interpretData.data) {
+        const label = MODULE_TYPE_LABELS[interpretData.moduleType] ?? interpretData.moduleType;
+        const solvedModel = await onModelInterpreted(interpretData.moduleType as ModuleId, interpretData.data);
+
+        if (!solvedModel) {
+          setTyping(false);
+          setMessages(m => [...m, {
+            role: "assistant",
+            text: `📥 Detecté un problema de **${label}**, pero no pude resolverlo automáticamente (¿existe ese módulo en la base de datos?). Revisa el editor.`
+          }]);
+          return;
+        }
+
+        const askData = await askAboutActiveModel(text, historyBeforeThis);
+        setTyping(false);
+
+        const intro = `📥 **${label}** — ${interpretData.explanation ?? ""}\n\n`;
+        const narration = askData.status === "success" && askData.reply
+          ? askData.reply
+          : "Ya resolví el modelo; revisa los resultados y el detalle paso a paso en el panel.";
+        setMessages(m => [...m, { role: "assistant", text: intro + narration }]);
+
+        // LLM #2: validador independiente, revisa el trabajo del LLM #1 antes de darlo por bueno.
+        setTyping(true);
+        try {
+          const validateRes = await fetch("http://localhost:4000/api/tutor/validate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              originalMessage: text,
+              moduleType: interpretData.moduleType,
+              data: interpretData.data,
+              solvedSolution: solvedModel.solutions?.[0] || {}
+            })
+          });
+          const validateData = await validateRes.json();
+          setTyping(false);
+
+          if (validateData.status === "success") {
+            const verdictEmoji: Record<string, string> = { valido: "✅", con_observaciones: "⚠️", invalido: "❌" };
+            const emoji = verdictEmoji[validateData.verdict] ?? "🔍";
+            const checksText = (validateData.checks_realizados as string[] || []).map((c: string) => `• ${c}`).join("\n");
+            const issuesText = (validateData.issues as string[] || []).length > 0
+              ? `\n\nProblemas encontrados:\n${(validateData.issues as string[]).map((i: string) => `• ${i}`).join("\n")}`
+              : "";
+            setMessages(m => [...m, {
+              role: "assistant",
+              text: `${emoji} Validación independiente: ${validateData.summary}\n\n${checksText}${issuesText}`
+            }]);
+          }
+        } catch {
+          setTyping(false);
+        }
+        return;
+      }
+
+      // No es un problema nuevo (o la interpretación falló): responder como tutor sobre el modelo activo.
+      const askData = await askAboutActiveModel(text, historyBeforeThis);
       setTyping(false);
-
-      if (resData.status === "success" && resData.reply) {
-        setMessages(m => [...m, { role: "assistant", text: resData.reply }]);
+      if (askData.status === "success" && askData.reply) {
+        setMessages(m => [...m, { role: "assistant", text: askData.reply }]);
       } else {
-        setMessages(m => [...m, { role: "assistant", text: "I'm having trouble analyzing the model right now. Could you please check the server connection?" }]);
+        setMessages(m => [...m, { role: "assistant", text: "No pude procesar tu mensaje. ¿Puedes reformularlo?" }]);
       }
     } catch (error) {
       setTyping(false);
-      setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Tutor Socrático. Asegúrate de que el backend está corriendo." }]);
+      setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Tutor. Asegúrate de que el backend está corriendo." }]);
     }
   };
 
-  const bg = dark ? "#0C0C10" : "#FFFFFF";
+  const bg = dark ? "#1C1F26" : "#FFFFFF";
   const border = dark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.09)";
   const accent = dark ? "#3B82F6" : "#1345A8";
 
@@ -1196,8 +1381,13 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
       </button>
 
       {/* Panel */}
+      <AnimatePresence>
       {open && (
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: 16, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 16, scale: 0.97 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
           className="fixed bottom-24 right-6 z-50 w-[340px] rounded-xl overflow-hidden flex flex-col"
           style={{
             background: bg,
@@ -1223,15 +1413,41 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
             </div>
           </div>
 
+          {/* Modo socrático */}
+          <button
+            onClick={() => setSocraticMode(v => !v)}
+            title={socraticMode ? "Modo socrático activo: te haré preguntas, no resolveré directo" : "Modo directo: resuelvo y te explico el resultado"}
+            className="px-4 py-2 flex items-center justify-between border-b transition-colors"
+            style={{ borderColor: border, background: socraticMode ? (dark ? "rgba(245,158,11,0.08)" : "rgba(180,83,9,0.06)") : "transparent" }}
+          >
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: socraticMode ? (dark ? "#F59E0B" : "#B45309") : (dark ? "#6B7280" : "#9CA3AF") }}>
+              🎓 Modo socrático {socraticMode ? "activo" : "inactivo"}
+            </span>
+            <div
+              className="w-8 h-4 rounded-full flex items-center px-0.5 transition-colors"
+              style={{ background: socraticMode ? (dark ? "#F59E0B" : "#B45309") : (dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)") }}
+            >
+              <div
+                className="w-3 h-3 rounded-full bg-white transition-transform"
+                style={{ transform: socraticMode ? "translateX(16px)" : "translateX(0)" }}
+              />
+            </div>
+          </button>
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ scrollbarWidth: "none" }}>
             {messages.map((m, i) => (
-              <div key={i} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
                 {m.role === "assistant" && (
                   <span className="text-[9px] font-mono mb-1" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>AI TUTOR</span>
                 )}
                 <div
-                  className="max-w-[92%] text-xs leading-relaxed px-3 py-2 rounded-lg"
+                  className="max-w-[92%] text-xs leading-relaxed px-3 py-2 rounded-lg whitespace-pre-wrap"
                   style={{
                     background: m.role === "user"
                       ? (dark ? "rgba(59,130,246,0.12)" : "rgba(19,69,168,0.07)")
@@ -1245,7 +1461,7 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
                 >
                   {m.text}
                 </div>
-              </div>
+              </motion.div>
             ))}
             {typing && (
               <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg w-fit" style={{ background: dark ? "rgba(255,255,255,0.04)" : "#F4F7F6", border: `1px solid ${border}` }}>
@@ -1283,13 +1499,19 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && send()}
               />
-              <button onClick={send} disabled={uploadingPdf} className="shrink-0 transition-opacity hover:opacity-70 disabled:opacity-30">
+              <button
+                onClick={send}
+                disabled={uploadingPdf || typing}
+                title="Enviar: si es un problema nuevo lo resuelve y te lo explica; si es una pregunta, te responde sobre el modelo activo"
+                className="shrink-0 transition-opacity hover:opacity-70 disabled:opacity-30"
+              >
                 <Send size={12} style={{ color: accent }} />
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </>
   );
 }
@@ -1304,7 +1526,7 @@ function Sidebar({
   dark: boolean; mobileOpen: boolean; setMobileOpen: (v: boolean) => void;
 }) {
   const accentBlue = dark ? "#3B82F6" : "#1345A8";
-  const bg = dark ? "#08080C" : "#FFFFFF";
+  const bg = dark ? "#191B21" : "#FFFFFF";
   const borderColor = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.07)";
   const textMuted = dark ? "#6B7280" : "#9CA3AF";
   const textFg = dark ? "#E2E8F0" : "#0D1B2A";
@@ -1367,7 +1589,7 @@ function Sidebar({
                 key={mod.id}
                 onClick={() => { setActive(mod.id); setMobileOpen(false); }}
                 title={collapsed ? mod.label : undefined}
-                className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-lg mb-0.5 text-left transition-colors"
+                className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-lg mb-0.5 text-left transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
                 style={{
                   background: isActive ? activeBg : "transparent",
                   borderLeft: isActive ? `2px solid ${accentBlue}` : "2px solid transparent",
@@ -1427,8 +1649,22 @@ function Sidebar({
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [dark, setDark] = useState(true);
-  const [activeModule, setActiveModule] = useState<ModuleId>("overview");
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem("tl_dark_mode");
+    return saved === null ? false : saved === "true";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("tl_dark_mode", String(dark));
+    document.documentElement.classList.toggle("dark", dark);
+  }, [dark]);
+  // El módulo activo vive en la URL (/lp, /transport, ...) en vez de en un useState local,
+  // así se puede compartir un enlace directo, usar atrás/adelante del navegador, y recargar
+  // sin perder el módulo en el que se estaba.
+  const { moduleId } = useParams<{ moduleId?: string }>();
+  const navigate = useNavigate();
+  const activeModule: ModuleId = (MODULES.some(m => m.id === moduleId) ? moduleId : "overview") as ModuleId;
+  const setActiveModule = (id: ModuleId) => navigate(id === "overview" ? "/" : `/${id}`);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -1456,10 +1692,7 @@ export default function App() {
     fetchModels();
   }, []);
 
-  const activeModelData = dbModels.find(m => {
-    if (activeModule === 'ip') return m.type.toUpperCase() === 'LP';
-    return m.type.toUpperCase() === activeModule.toUpperCase();
-  });
+  const activeModelData = dbModels.find(m => m.type.toUpperCase() === MODULE_TO_DB_TYPE[activeModule]);
 
   const handleToggleEdit = () => {
     if (!activeModelData) return;
@@ -1505,8 +1738,8 @@ export default function App() {
 
   const handleRunSolver = async () => {
     if (activeModule === "overview") return;
-    const solverType = activeModule === "ip" ? "lp" : activeModule;
-    const model = dbModels.find(m => m.type.toLowerCase() === (activeModule === "ip" ? "lp" : activeModule.toLowerCase()));
+    const solverType = MODULE_TO_SOLVER_PATH[activeModule];
+    const model = dbModels.find(m => m.type.toUpperCase() === MODULE_TO_DB_TYPE[activeModule]);
     if (!model) {
       alert("No se encontró configuración para este modelo en la base de datos.");
       return;
@@ -1529,6 +1762,10 @@ export default function App() {
             return {
               ...m,
               solutions: [{
+                // Se conserva el payload completo del solver (steps, method_used,
+                // initial_solution, comparisons, steps_note, etc.) además de los
+                // alias normalizados que ya esperan las vistas existentes.
+                ...result.data,
                 status: result.data.status,
                 objectiveValue,
                 variables,
@@ -1549,8 +1786,39 @@ export default function App() {
     }
   };
 
-  const bg = dark ? "#050505" : "#F4F7F6";
-  const topbarBg = dark ? "rgba(8,8,12,0.95)" : "rgba(255,255,255,0.96)";
+  // Llamado por el chat del tutor cuando detecta un enunciado nuevo: cambia de módulo,
+  // guarda y resuelve automáticamente (reusa el mismo endpoint que "Guardar y Resolver"),
+  // y devuelve el modelo ya resuelto para que el chat narre el resultado.
+  const handleModelInterpreted = async (moduleType: ModuleId, data: any): Promise<any> => {
+    const model = dbModels.find(m => m.type.toUpperCase() === MODULE_TO_DB_TYPE[moduleType]);
+    if (!model) {
+      return null;
+    }
+    setActiveModule(moduleType);
+    setJsonText(JSON.stringify(data, null, 2));
+    setJsonError(null);
+    setSolving(true);
+    try {
+      const response = await fetch(`http://localhost:4000/api/models/${model.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data })
+      });
+      const result = await response.json();
+      if (result.status === "success" && result.data) {
+        setDbModels(prev => prev.map(m => m.id === model.id ? result.data : m));
+        return result.data;
+      }
+      return null;
+    } catch (err) {
+      return null;
+    } finally {
+      setSolving(false);
+    }
+  };
+
+  const bg = dark ? "#14161B" : "#F4F7F6";
+  const topbarBg = dark ? "rgba(25,27,33,0.95)" : "rgba(255,255,255,0.96)";
   const borderColor = dark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.08)";
   const textFg = dark ? "#E2E8F0" : "#0D1B2A";
   const textMuted = dark ? "#6B7280" : "#9CA3AF";
@@ -1558,7 +1826,7 @@ export default function App() {
   const currentModule = MODULES.find(m => m.id === activeModule)!;
 
   const moduleView = {
-    overview:    <OverviewView dark={dark} />,
+    overview:    <OverviewView dark={dark} dbModels={dbModels} />,
     lp:          <LPView dark={dark} modelData={activeModelData} />,
     transport:   <TransportView dark={dark} modelData={activeModelData} />,
     networks:    <NetworksView dark={dark} modelData={activeModelData} />,
@@ -1603,6 +1871,32 @@ export default function App() {
               <Search size={12} />
               <span className="font-mono">Buscar módulos...</span>
               <span className="font-mono ml-8 text-[10px] opacity-50">⌘K</span>
+            </div>
+
+            {/* Anexo de interacción con IA (rúbrica académica) */}
+            <div className="hidden md:flex items-center rounded-lg text-xs font-mono overflow-hidden"
+              style={{ border: `1px solid ${borderColor}` }}>
+              <a
+                href="http://localhost:4000/api/audit/annex?format=pdf"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Descargar anexo de interacción con IA generativa en PDF (formato ficha, listo para el informe)"
+                className="flex items-center gap-1.5 px-3 py-1.5 transition-colors"
+                style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: textMuted }}
+              >
+                <Download size={13} />
+                <span>Anexo IA (PDF)</span>
+              </a>
+              <a
+                href="http://localhost:4000/api/audit/annex?format=csv"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Descargar anexo de interacción con IA generativa en CSV (tabla para Excel)"
+                className="px-2 py-1.5 transition-colors border-l"
+                style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: textMuted, borderColor }}
+              >
+                CSV
+              </a>
             </div>
 
             {/* Dark mode toggle */}
@@ -1718,14 +2012,24 @@ export default function App() {
                 </div>
               </Card>
             )}
-            {moduleView}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeModule}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
+                {moduleView}
+              </motion.div>
+            </AnimatePresence>
             <div className="h-20" />
           </main>
         </div>
       </div>
 
       {/* AI Tutor */}
-      <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} />
+      <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} onModelInterpreted={handleModelInterpreted} />
 
       <style>{`
         * { scrollbar-width: none; }

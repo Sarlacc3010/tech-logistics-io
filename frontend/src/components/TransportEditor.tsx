@@ -13,6 +13,7 @@ interface TransportData {
   supply: number[];
   demand: number[];
   costs: number[][];
+  initial_method?: "noroeste" | "costo_minimo" | "vogel";
 }
 
 export function TransportEditor({ jsonText, onChange, dark = true }: TransportEditorProps) {
@@ -148,6 +149,18 @@ export function TransportEditor({ jsonText, onChange, dark = true }: TransportEd
             <span className={`text-[10px] font-mono font-bold ${isBalanced ? 'text-emerald-500' : 'text-amber-500'}`}>
               {isBalanced ? 'BALANCEADO' : 'DESBALANCEADO'}
             </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase font-mono tracking-widest text-muted-foreground">Solución inicial:</span>
+            <select
+              value={data.initial_method ?? "vogel"}
+              onChange={e => syncToParent({ ...data, initial_method: e.target.value as TransportData["initial_method"] })}
+              className="bg-transparent border border-muted-foreground/30 rounded px-2 py-1 text-[10px] font-mono font-semibold focus:outline-none"
+            >
+              <option value="vogel">Vogel (VAM)</option>
+              <option value="noroeste">Esquina Noroeste</option>
+              <option value="costo_minimo">Costo Mínimo</option>
+            </select>
           </div>
         </div>
       </div>

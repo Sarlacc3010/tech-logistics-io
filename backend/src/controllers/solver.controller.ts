@@ -8,7 +8,8 @@ const TransportProblemSchema = z.object({
   destinations: z.array(z.string()),
   supply: z.array(z.number()),
   demand: z.array(z.number()),
-  costs: z.array(z.array(z.number()))
+  costs: z.array(z.array(z.number())),
+  initial_method: z.enum(['noroeste', 'costo_minimo', 'vogel']).nullable().optional()
 });
 
 const EdgeInputSchema = z.object({
@@ -33,7 +34,7 @@ const DPProblemSchema = z.object({
 });
 
 const InventoryProblemSchema = z.object({
-  calc_type: z.enum(['eoq', 'abc']),
+  calc_type: z.enum(['eoq', 'abc', 'eoq_discounts', 'eoq_backorders', 'epq', 'reorder_point']),
   parameters: z.record(z.any())
 });
 

@@ -3,6 +3,11 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
 import networkx as nx
 
+from app.algorithms.steps import SolutionStep
+from app.algorithms.networks.dijkstra import dijkstra
+from app.algorithms.networks.kruskal import kruskal
+from app.algorithms.networks.max_flow import edmonds_karp
+
 router = APIRouter()
 
 class EdgeInput(BaseModel):
@@ -35,89 +40,80 @@ class NetworkSolutionOutput(BaseModel):
     algorithm: str
     status: str
     result: Any
+    steps: Optional[List[SolutionStep]] = None
 
 @router.post("/solve", response_model=NetworkSolutionOutput)
 def solve_network(payload: NetworkProblemInput):
     try:
         alg = payload.algorithm.lower()
-        
-        # Build NetworkX Graph
-        if alg == "max_flow":
-            G = nx.DiGraph()
-            for e in payload.edges:
-                cap = e.capacity if e.capacity is not None else float('inf')
-                G.add_edge(e.source, e.target, capacity=cap)
+        edge_dicts = [
+            {
+                "source": e.source,
+                "target": e.target,
+                "weight": e.weight if e.weight is not None else 1.0,
+                "capacity": e.capacity if e.capacity is not None else float("inf"),
+            }
+            for e in payload.edges
+        ]
+
+        if alg == "shortest_path":
+            if not payload.source_node or not payload.target_node:
+                raise HTTPException(status_code=400, detail="source_node and target_node are required for shortest_path")
+            r = dijkstra(payload.nodes, edge_dicts, payload.source_node, payload.target_node)
+            if r["status"] != "Optimal":
+                raise HTTPException(status_code=400, detail=f"No existe camino entre {payload.source_node} y {payload.target_node}")
+            return NetworkSolutionOutput(
+                algorithm=payload.algorithm,
+                status="Optimal",
+                result={"path": r["path"], "cost": r["cost"]},
+                steps=r["steps"],
+            )
+
+        elif alg == "max_flow":
+            if not payload.source_node or not payload.target_node:
+                raise HTTPException(status_code=400, detail="source_node and target_node are required for max_flow")
+            r = edmonds_karp(payload.nodes, edge_dicts, payload.source_node, payload.target_node)
+            return NetworkSolutionOutput(
+                algorithm=payload.algorithm,
+                status="Optimal",
+                result={"total_flow": r["max_flow"], "flows": r["flows"]},
+                steps=r["steps"],
+            )
+
         elif alg == "min_cost_flow":
+            if not payload.demands:
+                raise HTTPException(status_code=400, detail="demands dict is required for min_cost_flow")
             G = nx.DiGraph()
             for e in payload.edges:
                 cap = int(e.capacity) if e.capacity is not None else None
                 weight = int(e.weight) if e.weight is not None else 0
                 G.add_edge(e.source, e.target, capacity=cap, weight=weight)
-        elif alg == "shortest_path":
-            G = nx.DiGraph()
-            for e in payload.edges:
-                w = e.weight if e.weight is not None else 1.0
-                G.add_edge(e.source, e.target, weight=w)
-        else: # min_spanning_tree
-            G = nx.Graph()
-            for e in payload.edges:
-                w = e.weight if e.weight is not None else 1.0
-                G.add_edge(e.source, e.target, weight=w)
-
-        # Run Algorithms
-        if alg == "shortest_path":
-            if not payload.source_node or not payload.target_node:
-                raise HTTPException(status_code=400, detail="source_node and target_node are required for shortest_path")
-            length = nx.shortest_path_length(G, source=payload.source_node, target=payload.target_node, weight='weight')
-            path = nx.shortest_path(G, source=payload.source_node, target=payload.target_node, weight='weight')
-            return NetworkSolutionOutput(
-                algorithm=payload.algorithm,
-                status="Optimal",
-                result={"path": path, "cost": length}
-            )
-            
-        elif alg == "max_flow":
-            if not payload.source_node or not payload.target_node:
-                raise HTTPException(status_code=400, detail="source_node and target_node are required for max_flow")
-            flow_value, flow_dict = nx.maximum_flow(G, payload.source_node, payload.target_node)
-            return NetworkSolutionOutput(
-                algorithm=payload.algorithm,
-                status="Optimal",
-                result={"total_flow": flow_value, "flows": flow_dict}
-            )
-            
-        elif alg == "min_cost_flow":
-            if not payload.demands:
-                raise HTTPException(status_code=400, detail="demands dict is required for min_cost_flow")
-            
-            # Set node demands
             for node, d in payload.demands.items():
                 G.nodes[node]['demand'] = int(d)
-                
+
             flow_cost, flow_dict = nx.network_simplex(G)
             return NetworkSolutionOutput(
                 algorithm=payload.algorithm,
                 status="Optimal",
                 result={"total_cost": flow_cost, "flows": flow_dict}
             )
-            
+
         elif alg == "min_spanning_tree":
-            mst = nx.minimum_spanning_tree(G, weight='weight')
-            edges_result = []
-            total_w = 0.0
-            for u, v, data in mst.edges(data=True):
-                w = data.get('weight', 1.0)
-                total_w += w
-                edges_result.append({"source": u, "target": v, "weight": w})
+            r = kruskal(payload.nodes, edge_dicts)
+            if r["status"] != "Optimal":
+                raise HTTPException(status_code=400, detail="El grafo no está conectado; no existe un único árbol de expansión mínima")
             return NetworkSolutionOutput(
                 algorithm=payload.algorithm,
                 status="Optimal",
-                result={"total_weight": total_w, "edges": edges_result}
+                result={"total_weight": r["total_weight"], "edges": r["edges"]},
+                steps=r["steps"],
             )
-            
+
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported network algorithm: {payload.algorithm}")
-            
+
+    except HTTPException:
+        raise
     except nx.NetworkXUnfeasible as e:
         raise HTTPException(status_code=400, detail=f"Network model is unfeasible: {str(e)}")
     except Exception as e:

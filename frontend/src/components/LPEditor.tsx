@@ -24,6 +24,7 @@ interface LPData {
   objective: "maximize" | "minimize";
   variables: LPVariable[];
   constraints: LPConstraint[];
+  method?: "auto" | "simplex" | "dosfases" | "granm" | "none";
 }
 
 export function LPEditor({ jsonText, onChange, dark = true }: LPEditorProps) {
@@ -114,6 +115,19 @@ export function LPEditor({ jsonText, onChange, dark = true }: LPEditorProps) {
         >
           <option value="maximize">Maximizar (Maximize)</option>
           <option value="minimize">Minimizar (Minimize)</option>
+        </select>
+
+        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground ml-4">Método:</span>
+        <select
+          value={data.method ?? "auto"}
+          onChange={e => sync({ ...data, method: e.target.value as LPData["method"] })}
+          className="bg-transparent border border-muted-foreground/30 rounded px-3 py-1.5 text-xs font-semibold focus:outline-none"
+        >
+          <option value="auto">Automático (Dos Fases si hace falta)</option>
+          <option value="simplex">Simplex estándar (solo restricciones ≤)</option>
+          <option value="dosfases">Dos Fases</option>
+          <option value="granm">Gran M</option>
+          <option value="none">Sin detalle paso a paso</option>
         </select>
       </div>
 

@@ -1,0 +1,95 @@
+from collections import deque
+from typing import Any, Dict, List
+
+from app.algorithms.steps import StepTracker
+
+MAX_ITERATIONS = 1000
+
+
+def _bfs_augmenting_path(residual: Dict[str, Dict[str, float]], source: str, sink: str):
+    parent = {source: None}
+    queue = deque([source])
+    while queue:
+        u = queue.popleft()
+        if u == sink:
+            break
+        for v, cap in residual.get(u, {}).items():
+            if cap > 1e-9 and v not in parent:
+                parent[v] = u
+                queue.append(v)
+    if sink not in parent:
+        return None
+    path = [sink]
+    while path[-1] != source:
+        path.append(parent[path[-1]])
+    path.reverse()
+    return path
+
+
+def edmonds_karp(nodes: List[str], edges: List[Dict[str, Any]], source: str, sink: str) -> Dict[str, Any]:
+    """Flujo máximo con Edmonds-Karp (Ford-Fulkerson con BFS), registrando cada camino de
+    aumento encontrado y el flujo residual actualizado."""
+    tracker = StepTracker()
+    residual: Dict[str, Dict[str, float]] = {n: {} for n in nodes}
+    original_capacity: Dict[str, Dict[str, float]] = {}
+    for e in edges:
+        u, v, cap = e["source"], e["target"], e.get("capacity", float("inf"))
+        residual.setdefault(u, {})
+        residual.setdefault(v, {})
+        residual[u][v] = residual[u].get(v, 0.0) + cap
+        residual[v].setdefault(u, 0.0)
+        original_capacity.setdefault(u, {})
+        original_capacity[u][v] = original_capacity[u].get(v, 0.0) + cap
+
+    tracker.add(
+        "Grafo residual inicial",
+        "El grafo residual arranca igual a las capacidades originales; cada arco tiene además "
+        "un arco inverso de capacidad 0 que se irá habilitando a medida que se envíe flujo.",
+        {"residual": {u: dict(vs) for u, vs in residual.items() if vs}},
+    )
+
+    max_flow = 0.0
+    for _ in range(MAX_ITERATIONS):
+        path = _bfs_augmenting_path(residual, source, sink)
+        if path is None:
+            tracker.add(
+                "Sin más caminos de aumento",
+                f"BFS desde {source} ya no puede alcanzar {sink} por arcos con capacidad "
+                "residual positiva, por lo que el flujo actual es máximo (corte mínimo saturado).",
+                {"max_flow": round(max_flow, 4)},
+            )
+            break
+
+        bottleneck = min(residual[path[i]][path[i + 1]] for i in range(len(path) - 1))
+        for i in range(len(path) - 1):
+            u, v = path[i], path[i + 1]
+            residual[u][v] -= bottleneck
+            residual[v][u] += bottleneck
+        max_flow += bottleneck
+
+        tracker.add(
+            f"Camino de aumento: {' -> '.join(path)}",
+            f"BFS encontró este camino con capacidad residual mínima (cuello de botella) de "
+            f"{bottleneck:.4g}. Se envía esa cantidad de flujo por el camino y se actualiza el "
+            "grafo residual (resta en el sentido del flujo, suma en el arco inverso).",
+            {
+                "path": path,
+                "bottleneck": round(bottleneck, 4),
+                "flow_so_far": round(max_flow, 4),
+                "residual": {u: dict(vs) for u, vs in residual.items() if vs},
+            },
+        )
+    else:
+        raise RuntimeError("Edmonds-Karp no convergió dentro del número máximo de iteraciones")
+
+    flows = {
+        u: {v: float(cap - residual[u].get(v, 0.0)) for v, cap in vs.items()}
+        for u, vs in original_capacity.items()
+    }
+
+    return {
+        "status": "Optimal",
+        "max_flow": float(max_flow),
+        "flows": flows,
+        "steps": [s.model_dump() for s in tracker.steps],
+    }

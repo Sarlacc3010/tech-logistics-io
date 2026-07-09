@@ -19,7 +19,7 @@ export function auditMiddleware(type: string) {
 
     res.on('finish', () => {
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        if (type === 'gemini_tutor') {
+        if (type === 'groq_tutor') {
           // Save to MongoDB for IA tutor audit log
           const userId = req.body.userId || 'default-user';
           const problemContext = req.body.problemContext || 'No context';
