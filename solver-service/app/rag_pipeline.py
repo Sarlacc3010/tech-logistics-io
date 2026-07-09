@@ -11,7 +11,8 @@ from tqdm import tqdm
 
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 COLLECTION_NAME = "tech_logistics"
-OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/generate")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
 _embedding_model: Optional[SentenceTransformer] = None
 
@@ -217,23 +218,26 @@ Respuesta:
 """
     return prompt.strip()
 
-def query_local_llm(prompt: str, model: str = "mistral") -> str:
-    """Hace un POST request directo con requests a la API de Ollama."""
+def query_gemini_llm(prompt: str) -> str:
+    """Hace un POST request directo con requests a la API de Google Gemini."""
+    if not GEMINI_API_KEY:
+        return "Error: GEMINI_API_KEY no está configurada en las variables de entorno."
+
     payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
     }
     try:
-        response = requests.post(OLLAMA_API_URL, json=payload, timeout=120)
+        response = requests.post(GEMINI_API_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=120)
         response.raise_for_status()
         data = response.json()
-        return data.get("response", "Sin respuesta del modelo.")
+        return data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Sin respuesta del modelo.")
     except Exception as e:
-        return f"Error al conectar con Ollama: {str(e)}"
+        return f"Error al conectar con Gemini: {str(e)}"
 
 def main():
-    parser = argparse.ArgumentParser(description="Sistema RAG local para logística usando ChromaDB y Ollama")
+    parser = argparse.ArgumentParser(description="Sistema RAG local para logística usando ChromaDB y Gemini")
     parser.add_argument("--ingest", type=str, help="Ruta al directorio de archivos .json/.md para ingesta")
     parser.add_argument("--persist_dir", type=str, default="./chroma_db", help="Directorio para persistir ChromaDB")
     parser.add_argument("--query", type=str, help="Pregunta del usuario para el sistema RAG")
@@ -254,10 +258,10 @@ def main():
         dummy_solver_result = {"status": "optimal", "objective": 15000}
         dummy_translation_dict = {"x1": "Cantidad a enviar desde Almacén A"}
         
-        print("Construyendo prompt y consultando al LLM local (Ollama)...")
+        print("Construyendo prompt y consultando a Gemini...")
         prompt = build_prompt(args.query, docs, dummy_translation_dict, dummy_solver_result)
         
-        response = query_local_llm(prompt, model="mistral")
+        response = query_gemini_llm(prompt)
         
         print("\n" + "="*50)
         print("RESPUESTA DEL ASISTENTE LOGÍSTICO:")
