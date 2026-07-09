@@ -44,6 +44,16 @@ export async function updateModel(req: Request, res: Response, next: NextFunctio
       const formatted = { ...data, objective: data.objective.toLowerCase() };
       solutionResult = await SolverClientService.solveLP(formatted);
     } else if (model.type === 'TRANSPORT') {
+      const { origins, destinations, supply, demand, costs } = data;
+      if (!origins || !destinations || !supply || !demand || !costs) {
+        return res.status(400).json({ status: 'error', message: 'Faltan datos requeridos (origins, destinations, supply, demand, costs).' });
+      }
+      if (supply.length !== costs.length) {
+        return res.status(400).json({ status: 'error', message: `Las filas de la matriz de costos (${costs.length}) no coinciden con la cantidad de orígenes/oferta (${supply.length}).` });
+      }
+      if (costs.length > 0 && demand.length !== costs[0].length) {
+        return res.status(400).json({ status: 'error', message: `Las columnas de la matriz de costos (${costs[0].length}) no coinciden con la cantidad de destinos/demanda (${demand.length}). Verifica que todos los datos estén completos.` });
+      }
       solutionResult = await SolverClientService.solveTransport(data);
     } else if (model.type === 'NETWORKS') {
       solutionResult = await SolverClientService.solveNetworks(data);

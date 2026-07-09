@@ -11,7 +11,8 @@ const TutorRequestSchema = z.object({
       role: z.enum(['user', 'model', 'assistant']),
       text: z.string()
     })
-  ).optional()
+  ).optional(),
+  currentModelData: z.any().optional()
 });
 
 export async function askTutor(req: Request, res: Response, next: NextFunction) {
@@ -25,18 +26,21 @@ export async function askTutor(req: Request, res: Response, next: NextFunction) 
       });
     }
 
-    const { problemContext, mathematicalSolution, userMessage, chatHistory } = parseResult.data;
+    const { problemContext, mathematicalSolution, userMessage, chatHistory, currentModelData } = parseResult.data;
 
-    const reply = await GroqService.generateSocraticResponse(
+    const result = await GroqService.generateSocraticResponse(
       problemContext,
       mathematicalSolution || {},
       userMessage,
-      chatHistory || []
+      chatHistory || [],
+      currentModelData
     );
 
     res.status(200).json({
       status: 'success',
-      reply
+      reply: result.reply,
+      action: result.action || null,
+      newModelData: result.newModelData || null
     });
   } catch (error) {
     next(error);

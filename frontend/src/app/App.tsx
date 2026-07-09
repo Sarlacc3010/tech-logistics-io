@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -11,7 +13,8 @@ import {
   ChevronRight, Download, RefreshCw, Filter, MapPin, Activity,
   ArrowUpRight, ArrowDownRight, Brain, Zap, Menu, Globe,
   AlertTriangle, CheckCircle2, Clock, Info, ChevronDown,
-  ChevronsLeft, ChevronsRight, Terminal, Paperclip, Check
+  ChevronsLeft, ChevronsRight, Terminal, Paperclip, Check,
+  Minus
 } from "lucide-react";
 import { TransportEditor } from "../components/TransportEditor";
 import { LPEditor } from "../components/LPEditor";
@@ -83,18 +86,18 @@ const lpSensChart = [
 ];
 
 const costMatrix = [
-  { origin: "Seattle (S1)",  denver: 12, chicago: 18, miami: 28, newYork: 22, supply: 180 },
-  { origin: "Dallas (S2)",   denver:  9, chicago: 14, miami: 16, newYork: 24, supply: 240 },
-  { origin: "Atlanta (S3)",  denver: 20, chicago: 11, miami:  8, newYork: 13, supply: 160 },
-  { origin: "Demanda",       denver: 140, chicago: 160, miami: 120, newYork: 160, supply: null },
+  { origin: "Quito Norte",  manta: 12, loja: 18, machala: 28, ambato: 22, supply: 180 },
+  { origin: "Guayaquil Sur", manta:  9, loja: 14, machala: 16, ambato: 24, supply: 240 },
+  { origin: "Cuenca C.",     manta: 20, loja: 11, machala:  8, ambato: 13, supply: 160 },
+  { origin: "Demanda",       manta: 140, loja: 160, machala: 120, ambato: 160, supply: null },
 ];
 const transportPlan = [
-  { route: "Seattle → Denver",   units: 140, cost: 1680, pct: 78, status: "Óptimo" },
-  { route: "Seattle → Chicago",  units:  40, cost:  720, pct: 22, status: "Óptimo" },
-  { route: "Dallas → Chicago",   units: 120, cost: 1680, pct: 50, status: "Óptimo" },
-  { route: "Dallas → New York",  units: 120, cost: 2880, pct: 50, status: "Óptimo" },
-  { route: "Atlanta → Miami",    units: 120, cost:  960, pct: 75, status: "Óptimo" },
-  { route: "Atlanta → New York", units:  40, cost:  520, pct: 25, status: "Subóptimo" },
+  { route: "Quito → Manta",   units: 140, cost: 1680, pct: 78, status: "Óptimo" },
+  { route: "Quito → Loja",  units:  40, cost:  720, pct: 22, status: "Óptimo" },
+  { route: "Guayaquil → Loja",   units: 120, cost: 1680, pct: 50, status: "Óptimo" },
+  { route: "Guayaquil → Ambato",  units: 120, cost: 2880, pct: 50, status: "Óptimo" },
+  { route: "Cuenca → Machala",    units: 120, cost:  960, pct: 75, status: "Óptimo" },
+  { route: "Cuenca → Ambato", units:  40, cost:  520, pct: 25, status: "Subóptimo" },
 ];
 
 const networkNodes = [
@@ -239,9 +242,10 @@ function Badge({ label, variant = "default" }: { label: string; variant?: "defau
 }
 
 function IconBtn({ icon: Icon, onClick, title }: { icon: React.ElementType; onClick?: () => void; title?: string }) {
+  const isDisabled = !onClick;
   return (
-    <button onClick={onClick} title={title}
-      className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+    <button onClick={onClick} title={isDisabled ? "Próximamente" : title} disabled={isDisabled}
+      className={`p-1.5 rounded transition-colors ${isDisabled ? "text-muted-foreground opacity-40 cursor-not-allowed" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}>
       <Icon size={14} />
     </button>
   );
@@ -284,14 +288,20 @@ const ROUTES = [
 
 const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }> = {
   // Transport hubs
-  "Seattle": { name: "Quito", coords: [-0.1807, -78.4678] },
-  "Denver": { name: "Manta", coords: [-0.9621, -80.7127] },
-  "Chicago": { name: "Guayaquil", coords: [-2.1894, -79.8890] },
-  "Miami": { name: "Cuenca", coords: [-2.9001, -79.0059] },
-  "New York": { name: "Ambato", coords: [-1.2491, -78.6273] },
-  "New_York": { name: "Ambato", coords: [-1.2491, -78.6273] },
-  "Dallas": { name: "Santo Domingo", coords: [-0.2530, -79.1754] },
-  "Atlanta": { name: "Ibarra", coords: [0.3517, -78.1222] },
+  "Quito": { name: "Quito", coords: [-0.1807, -78.4678] },
+  "Manta": { name: "Manta", coords: [-0.9621, -80.7127] },
+  "Guayaquil": { name: "Guayaquil", coords: [-2.1894, -79.8890] },
+  "Cuenca": { name: "Cuenca", coords: [-2.9001, -79.0059] },
+  "Ambato": { name: "Ambato", coords: [-1.2491, -78.6273] },
+  "Santo Domingo": { name: "Santo Domingo", coords: [-0.2530, -79.1754] },
+  "Ibarra": { name: "Ibarra", coords: [0.3517, -78.1222] },
+  "Loja": { name: "Loja", coords: [-3.9931, -79.2042] },
+  "Esmeraldas": { name: "Esmeraldas", coords: [0.9682, -79.6517] },
+  "Machala": { name: "Machala", coords: [-3.2581, -79.9553] },
+  "Portoviejo": { name: "Portoviejo", coords: [-1.0546, -80.4542] },
+  "Riobamba": { name: "Riobamba", coords: [-1.6709, -78.6475] },
+  "Tena": { name: "Tena", coords: [-0.9938, -77.8129] },
+  "Coca": { name: "Coca", coords: [-0.4665, -76.9871] },
 
   // Overview hubs
   "NY": { name: "Quito", coords: [-0.1807, -78.4678] },
@@ -718,6 +728,7 @@ function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
 
 function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const transportData = modelData?.data;
 
   const displayPlan = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
     route: `${v.origin.replace(/_/g, ' ')} → ${v.destination.replace(/_/g, ' ')}`,
@@ -735,10 +746,33 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
     units: v.units,
     active: v.units > 0
   })) : [
-    { from: "Seattle", to: "Denver", units: 240, active: true },
-    { from: "Chicago", to: "Chicago", units: 100, active: false },
-    { from: "New York", to: "New York", units: 100, active: false },
+    { from: "Quito", to: "Manta", units: 240, active: true },
+    { from: "Guayaquil", to: "Guayaquil", units: 100, active: false },
+    { from: "Cuenca", to: "Cuenca", units: 100, active: false },
   ];
+
+  const destinations = transportData?.destinations || ["Manta", "Loja", "Machala", "Ambato"];
+  const headers = [...destinations, "Oferta"];
+
+  const matrixRows = transportData ? transportData.origins.map((origin: string, i: number) => {
+    return {
+      origin: origin.replace(/_/g, ' '),
+      costs: transportData.costs[i],
+      supply: transportData.supply[i]
+    };
+  }) : costMatrix.slice(0, 3).map(row => ({
+    origin: row.origin,
+    costs: [row.manta, row.loja, row.machala, row.ambato],
+    supply: row.supply
+  }));
+
+  const demandRow = {
+    origin: "Demanda",
+    costs: transportData?.demand || [140, 160, 120, 160],
+    supply: null
+  };
+  
+  const allRows = [...matrixRows, demandRow];
 
   return (
     <div className="flex flex-col gap-4">
@@ -751,31 +785,34 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Card>
-          <SectionHeader title="Cost Matrix ($/unit)" sub="Transportation tableau — Northwest corner initialized" />
+          <SectionHeader title="Matriz de Costos ($/unidad)" sub="Costos de envío, demanda y oferta por cada ubicación" />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground">Origin \ Dest.</th>
-                  {["Denver", "Chicago", "Miami", "New York", "Supply"].map(h => (
-                    <th key={h} className="text-center px-3 py-2.5 text-[10px] font-mono text-muted-foreground">{h}</th>
+                  <th className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground">Origen \ Destino</th>
+                  {headers.map(h => (
+                    <th key={h} className="text-center px-3 py-2.5 text-[10px] font-mono text-muted-foreground">{typeof h === 'string' ? h.replace(/_/g, ' ') : h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {costMatrix.map((row, i) => (
-                  <tr key={i} className={`${i === 3 ? "border-t-2 border-border bg-secondary/20" : "hover:bg-secondary/30"} transition-colors`}>
-                    <td className="px-5 py-3 font-mono text-foreground text-[11px]">{row.origin}</td>
-                    {[row.denver, row.chicago, row.miami, row.newYork].map((v, j) => (
-                      <td key={j} className={`text-center px-3 py-3 font-mono font-semibold text-[11px] ${i === 3 ? "text-primary" : "text-foreground"}`}>
-                        {i < 3 ? `$${v}` : v}
+                {allRows.map((row, i) => {
+                  const isDemand = i === allRows.length - 1;
+                  return (
+                    <tr key={i} className={`${isDemand ? "border-t-2 border-border bg-secondary/20" : "hover:bg-secondary/30"} transition-colors`}>
+                      <td className="px-5 py-3 font-mono text-foreground text-[11px]">{row.origin}</td>
+                      {row.costs.map((v: number, j: number) => (
+                        <td key={j} className={`text-center px-3 py-3 font-mono font-semibold text-[11px] ${isDemand ? "text-primary" : "text-foreground"}`}>
+                          {isDemand ? v : `$${v}`}
+                        </td>
+                      ))}
+                      <td className={`text-center px-3 py-3 font-mono font-bold text-[11px] ${!isDemand ? "text-primary" : "text-muted-foreground"}`}>
+                        {row.supply !== null ? row.supply : "—"}
                       </td>
-                    ))}
-                    <td className={`text-center px-3 py-3 font-mono font-bold text-[11px] ${i < 3 ? "text-primary" : "text-muted-foreground"}`}>
-                      {row.supply !== null ? row.supply : "—"}
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1081,16 +1118,16 @@ function InventoriesView({ dark, modelData }: { dark: boolean; modelData?: any }
 // ─── AI Tutor ─────────────────────────────────────────────────────────────────
 
 const MODULE_INTROS: Record<ModuleId, string> = {
-  overview:    "Bienvenido al Centro de Control. Como tu Consultor Ejecutivo, estoy listo para interpretar los KPIs y diagnosticar anomalías en tu cadena de suministro.",
-  lp:          "Módulo de Optimización Lineal. ¿Deseas que analice los resultados de la función objetivo o que evaluemos los ahorros marginales de tus recursos?",
-  transport:   "Módulo de Transporte. Estoy listo para evaluar el costo total de distribución y recomendar ajustes en tus rutas óptimas.",
-  networks:    "Módulo de Redes. ¿Quieres que analicemos los flujos de costo mínimo o identifiquemos los cuellos de botella en la red?",
-  ip:          "Módulo de Programación Entera. ¿Procedemos a evaluar las decisiones estratégicas de la solución exacta?",
-  dp:          "Módulo de Programación Dinámica. ¿Revisamos la política óptima y los costos acumulados por período?",
-  inventories: "Módulo de Inventarios. ¿Te gustaría analizar los parámetros de pedido óptimos y costos de almacenamiento?",
+  overview:    "Bienvenido al Centro de Control. Como tu Consultor Ejecutivo, estoy listo para interpretar los indicadores clave y diagnosticar oportunidades de mejora en tu cadena de suministro.",
+  lp:          "Módulo de Optimización de Recursos. ¿Deseas que analice los resultados o que evaluemos los ahorros potenciales de tus recursos?",
+  transport:   "Módulo de Distribución y Transporte. Estoy listo para evaluar el costo total de distribución y recomendar ajustes en tus rutas.",
+  networks:    "Módulo de Redes Logísticas. ¿Quieres que analicemos los flujos de distribución o identifiquemos los cuellos de botella en la red?",
+  ip:          "Módulo de Decisiones Estratégicas. ¿Procedemos a evaluar las opciones de inversión o asignación?",
+  dp:          "Módulo de Planificación por Etapas. ¿Revisamos la política óptima y los costos acumulados por período?",
+  inventories: "Módulo de Inventarios. ¿Te gustaría analizar los niveles óptimos de pedido y los costos de almacenamiento?",
 };
 
-function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activeModule: ModuleId; activeModelData?: any }) {
+function AiTutor({ dark, activeModule, activeModelData, onUpdateModelData }: { dark: boolean; activeModule: ModuleId; activeModelData?: any; onUpdateModelData?: (newJson: string) => void }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const [input, setInput] = useState("");
@@ -1162,7 +1199,8 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
           chatHistory: messages.map(m => ({
             role: m.role === "assistant" ? "model" : "user",
             text: m.text
-          }))
+          })),
+          currentModelData: activeModelData?.data || null
         })
       });
 
@@ -1171,12 +1209,17 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
 
       if (resData.status === "success" && resData.reply) {
         setMessages(m => [...m, { role: "assistant", text: resData.reply }]);
+
+        // Handle data update action from Tool Calling
+        if (resData.action === "UPDATE_MODEL" && resData.newModelData && onUpdateModelData) {
+          onUpdateModelData(JSON.stringify(resData.newModelData, null, 2));
+        }
       } else {
-        setMessages(m => [...m, { role: "assistant", text: "I'm having trouble analyzing the model right now. Could you please check the server connection?" }]);
+        setMessages(m => [...m, { role: "assistant", text: "Hubo un problema al procesar tu solicitud. Verifica la conexión del servidor." }]);
       }
     } catch (error) {
       setTyping(false);
-      setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Tutor Socrático. Asegúrate de que el backend está corriendo." }]);
+      setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Asistente IA. Asegúrate de que el backend está corriendo." }]);
     }
   };
 
@@ -1186,52 +1229,60 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
 
   return (
     <>
-      {/* Toggle button */}
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-transform hover:scale-105"
-        style={{ background: accent, boxShadow: `0 4px 20px ${accent}50` }}
-      >
-        {open ? <X size={18} className="text-white" /> : <Brain size={18} className="text-white" />}
-      </button>
+      {/* Toggle button — only visible when chat is closed */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-transform hover:scale-105"
+          style={{ background: accent, boxShadow: `0 4px 20px ${accent}50` }}
+        >
+          <Brain size={18} className="text-white" />
+        </button>
+      )}
 
       {/* Panel */}
       {open && (
         <div
-          className="fixed bottom-24 right-6 z-50 w-[340px] rounded-xl overflow-hidden flex flex-col"
+          className="fixed bottom-6 right-6 z-50 w-[440px] rounded-xl overflow-hidden flex flex-col"
           style={{
             background: bg,
             border: `1px solid ${border}`,
             boxShadow: dark ? "0 20px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)" : "0 20px 60px rgba(0,0,0,0.15)",
-            height: 480,
+            height: 620,
           }}
         >
           {/* Header */}
           <div className="px-4 py-3 flex items-center gap-2.5 border-b" style={{ borderColor: border }}>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: accent }}>
-              <Brain size={14} className="text-white" />
+            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: accent }}>
+              <Brain size={12} className="text-white" />
             </div>
-            <div>
-              <p className="text-sm font-semibold" style={{ color: dark ? "#E2E8F0" : "#0D1B2A" }}>AI Tutor</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: dark ? "#E2E8F0" : "#0D1B2A" }}>Asistente IA</p>
               <p className="text-[10px] font-mono" style={{ color: dark ? "#3B82F6" : "#1345A8" }}>
-                {MODULES.find(m => m.id === activeModule)?.shortLabel} · ACTIVE
+                {MODULES.find(m => m.id === activeModule)?.shortLabel} · Llama 3.3
               </p>
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-mono" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>GPT-4o</span>
+              <button
+                onClick={() => setOpen(false)}
+                className="ml-2 p-1 rounded hover:bg-white/10 transition-colors"
+                title="Minimizar"
+              >
+                <Minus size={14} style={{ color: dark ? "#6B7280" : "#9CA3AF" }} />
+              </button>
             </div>
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ scrollbarWidth: "none" }}>
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ scrollbarWidth: "thin" }}>
             {messages.map((m, i) => (
               <div key={i} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
                 {m.role === "assistant" && (
-                  <span className="text-[9px] font-mono mb-1" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>AI TUTOR</span>
+                  <span className="text-[9px] font-mono mb-1" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>ASISTENTE IA</span>
                 )}
                 <div
-                  className="max-w-[92%] text-xs leading-relaxed px-3 py-2 rounded-lg"
+                  className="max-w-[95%] text-xs leading-relaxed px-3 py-2.5 rounded-lg"
                   style={{
                     background: m.role === "user"
                       ? (dark ? "rgba(59,130,246,0.12)" : "rgba(19,69,168,0.07)")
@@ -1243,7 +1294,24 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
                     borderRadius: m.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
                   }}
                 >
-                  {m.text}
+                  {m.role === "assistant" ? (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        table: ({children, ...props}) => <table className="w-full text-[11px] my-2 border-collapse" {...props}>{children}</table>,
+                        thead: ({children, ...props}) => <thead className="border-b border-white/10" {...props}>{children}</thead>,
+                        th: ({children, ...props}) => <th className="text-left px-2 py-1 font-semibold text-[10px] uppercase tracking-wide opacity-70" {...props}>{children}</th>,
+                        td: ({children, ...props}) => <td className="px-2 py-1 border-t border-white/5" {...props}>{children}</td>,
+                        strong: ({children, ...props}) => <strong className="font-bold" style={{ color: dark ? "#60A5FA" : "#1345A8" }} {...props}>{children}</strong>,
+                        ul: ({children, ...props}) => <ul className="list-disc pl-4 my-1 space-y-0.5" {...props}>{children}</ul>,
+                        ol: ({children, ...props}) => <ol className="list-decimal pl-4 my-1 space-y-0.5" {...props}>{children}</ol>,
+                        h3: ({children, ...props}) => <h3 className="text-sm font-bold mt-2 mb-1" {...props}>{children}</h3>,
+                        p: ({children, ...props}) => <p className="mb-1.5 last:mb-0" {...props}>{children}</p>,
+                      }}
+                    >{m.text}</ReactMarkdown>
+                  ) : (
+                    m.text
+                  )}
                 </div>
               </div>
             ))}
@@ -1478,11 +1546,11 @@ export default function App() {
     }
   };
 
-  const handleSaveAndSolve = async () => {
-    if (jsonError || !activeModelData) return;
+  const handleSaveAndSolve = async (dataToSave?: any) => {
+    if ((jsonError && !dataToSave) || !activeModelData) return;
     setSolving(true);
     try {
-      const parsedData = JSON.parse(jsonText);
+      const parsedData = dataToSave || JSON.parse(jsonText);
       const response = await fetch(`http://localhost:4000/api/models/${activeModelData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1492,7 +1560,10 @@ export default function App() {
       if (result.status === "success" && result.data) {
         setDbModels(prev => prev.map(m => m.id === activeModelData.id ? result.data : m));
         setEditing(false);
-        alert("¡Parámetros guardados y modelo resuelto con éxito!");
+        // Ocultar la alerta molesta para una mejor UX cuando la IA actualiza
+        if (!dataToSave) {
+          alert("¡Parámetros guardados y modelo resuelto con éxito!");
+        }
       } else {
         alert(`Error al guardar y resolver: ${result.message}`);
       }
@@ -1598,8 +1669,9 @@ export default function App() {
             <div className="flex-1" />
 
             {/* Search */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
-              style={{ background: dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${borderColor}`, color: textMuted }}>
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs opacity-40 cursor-not-allowed"
+              style={{ background: dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${borderColor}`, color: textMuted }}
+              title="Próximamente">
               <Search size={12} />
               <span className="font-mono">Buscar módulos...</span>
               <span className="font-mono ml-8 text-[10px] opacity-50">⌘K</span>
@@ -1615,12 +1687,12 @@ export default function App() {
               <span>{dark ? "Claro" : "Oscuro"}</span>
             </button>
 
-            <button className="relative p-1.5 rounded transition-colors" style={{ color: textMuted }}>
+            <button className="relative p-1.5 rounded transition-colors opacity-40 cursor-not-allowed" style={{ color: textMuted }} title="Próximamente">
               <Bell size={16} />
               <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
             </button>
 
-            <button className="p-1.5 rounded transition-colors" style={{ color: textMuted }}>
+            <button className="p-1.5 rounded transition-colors opacity-40 cursor-not-allowed" style={{ color: textMuted }} title="Próximamente">
               <Settings size={16} />
             </button>
 
@@ -1681,7 +1753,7 @@ export default function App() {
                   actions={
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={handleSaveAndSolve}
+                        onClick={() => handleSaveAndSolve()}
                         disabled={solving || !!jsonError}
                         className="text-xs px-3 py-1.5 bg-emerald-600 text-white rounded font-semibold disabled:opacity-50"
                       >
@@ -1725,7 +1797,7 @@ export default function App() {
       </div>
 
       {/* AI Tutor */}
-      <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} />
+      <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} onUpdateModelData={(newJson) => { handleJsonChange(newJson); setEditing(true); handleSaveAndSolve(JSON.parse(newJson)); }} />
 
       <style>{`
         * { scrollbar-width: none; }

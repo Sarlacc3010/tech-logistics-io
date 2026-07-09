@@ -73,8 +73,8 @@ async function main() {
 
   // 5. Create Transportation model & solve it
   const transportData = {
-    origins: ['Seattle_S1', 'Dallas_S2', 'Atlanta_S3'],
-    destinations: ['Denver_D1', 'Chicago_D2', 'Miami_D3', 'New_York_D4'],
+    origins: ['Quito_Norte', 'Guayaquil_Sur', 'Cuenca_Central'],
+    destinations: ['Manta_D1', 'Loja_D2', 'Machala_D3', 'Ambato_D4'],
     supply: [180.0, 240.0, 160.0],
     demand: [140.0, 160.0, 120.0, 160.0],
     costs: [
