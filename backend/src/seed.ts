@@ -111,22 +111,25 @@ async function main() {
   // 6. Create Networks model & solve it (Min Cost Flow)
   const networksData = {
     algorithm: 'min_cost_flow',
-    nodes: ['Node_1', 'Node_2', 'Node_3', 'Node_4', 'Node_5', 'Node_6'],
+    nodes: ['Quito', 'Guayaquil', 'Cuenca', 'Santo_Domingo', 'Manta', 'Ambato', 'Riobamba'],
     edges: [
-      { source: 'Node_1', target: 'Node_3', capacity: 200, weight: 10 },
-      { source: 'Node_2', target: 'Node_3', capacity: 150, weight: 12 },
-      { source: 'Node_3', target: 'Node_4', capacity: 180, weight: 8 },
-      { source: 'Node_3', target: 'Node_5', capacity: 200, weight: 15 },
-      { source: 'Node_4', target: 'Node_5', capacity: 170, weight: 7 },
-      { source: 'Node_4', target: 'Node_6', capacity: 180, weight: 11 },
+      { source: 'Manta', target: 'Santo_Domingo', capacity: 300, weight: 10 },
+      { source: 'Guayaquil', target: 'Santo_Domingo', capacity: 400, weight: 12 },
+      { source: 'Guayaquil', target: 'Riobamba', capacity: 250, weight: 15 },
+      { source: 'Guayaquil', target: 'Cuenca', capacity: 300, weight: 11 },
+      { source: 'Santo_Domingo', target: 'Quito', capacity: 500, weight: 8 },
+      { source: 'Santo_Domingo', target: 'Ambato', capacity: 250, weight: 12 },
+      { source: 'Riobamba', target: 'Ambato', capacity: 200, weight: 5 },
+      { source: 'Riobamba', target: 'Cuenca', capacity: 180, weight: 14 },
     ],
     source_node: null,
     target_node: null,
     demands: {
-      Node_1: -200,
-      Node_2: -150,
-      Node_5: 170,
-      Node_6: 180,
+      Quito: 300,       // Demand (Sink > 0)
+      Manta: -150,      // Supply (Source < 0)
+      Guayaquil: -400,  // Supply (Source < 0)
+      Cuenca: 150,      // Demand (Sink > 0)
+      Ambato: 100,      // Demand (Sink > 0)
     },
   };
 

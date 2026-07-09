@@ -861,80 +861,111 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
 
 function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const netData = modelData?.data;
 
   const displayNodes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
-    Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
-      node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
-      type: "Active Arc",
-      flow_in: flow,
-      flow_out: flow,
-      excess: flow > 0 ? flow : 0
-    }))
-  ) : null;
+    Object.entries(targets).map(([tgt, flow]: [string, any]) => {
+      const edge = netData?.edges?.find((e: any) => e.source === src && e.target === tgt);
+      const cost = edge ? edge.weight * flow : 0;
+      return {
+        node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
+        type: flow > 0 ? "Active Arc" : "Inactive Arc",
+        flow_in: flow,
+        flow_out: flow,
+        excess: flow > 0 ? flow : 0,
+        cost: cost
+      };
+    })
+  ).filter(r => r.flow_in > 0) : null;
 
-  const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 6820;
+  const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 0;
 
   const mapRoutes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
     Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
-      from: src,
-      to: tgt,
+      from: src.replace(/_/g, ' '),
+      to: tgt.replace(/_/g, ' '),
       units: flow,
       active: flow > 0
     }))
-  ) : [
-    { from: "Node_1", to: "Node_3", units: 150, active: true },
-    { from: "Node_1", to: "Node_4", units: 50, active: true },
-    { from: "Node_2", to: "Node_3", units: 100, active: true },
-    { from: "Node_2", to: "Node_4", units: 50, active: true },
-    { from: "Node_3", to: "Node_5", units: 200, active: true },
-    { from: "Node_4", to: "Node_5", units: 150, active: true },
-  ];
+  ) : [];
+
+  // Generate Cumulative Cost Data for LineChart
+  const cumulativeData: any[] = [];
+  let cumSum = 0;
+  if (displayNodes) {
+    displayNodes.forEach((r, i) => {
+      cumSum += r.cost;
+      cumulativeData.push({
+        step: i + 1,
+        route: r.node,
+        cost: r.cost,
+        cumulative: cumSum
+      });
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <SectionHeader title="Mapa Real de Flujo de Redes" sub="Visualización interactiva de nodos y arcos con flujos óptimos calculados" />
+        <SectionHeader title="Mapa Real de Flujo de Redes" sub="Visualización interactiva de rutas y flujos óptimos en Ecuador" />
         <div className="p-4">
           <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
         </div>
       </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {/* Nodos Input Table */}
         <Card>
-          <SectionHeader title="Node Flow Analysis" sub={`Min-cost flow · total flow: 350 units · total cost: $${totalCost.toLocaleString()}`} />
+          <SectionHeader title="Nodos del Sistema" sub="Oferta y Demanda de cada ciudad" />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  {["Arc / Route", "Type", "Flow In", "Flow Out", "Flow Amount"].map(h => (
+                  {["Ciudad / Nodo", "Tipo", "Oferta / Demanda (Unidades)"].map(h => (
                     <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {displayNodes ? displayNodes.map((r, i) => (
+                {netData?.nodes?.map((node: string, i: number) => {
+                  const demand = netData.demands?.[node] || 0;
+                  const type = demand < 0 ? "Planta (Oferta)" : demand > 0 ? "Cliente (Demanda)" : "Transbordo";
+                  return (
+                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-5 py-3 font-mono text-[11px] text-foreground">{node.replace(/_/g, ' ')}</td>
+                      <td className="px-5 py-3">
+                        <Badge label={type} variant={demand < 0 ? "info" : demand > 0 ? "warning" : "default"} />
+                      </td>
+                      <td className={`px-5 py-3 font-mono font-semibold ${demand < 0 ? "text-emerald-600" : demand > 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                        {Math.abs(demand)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* Edges Input Table */}
+        <Card>
+          <SectionHeader title="Arcos (Rutas Posibles)" sub="Conexiones, capacidades y costos de envío" />
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Origen", "Destino", "Costo Unitario", "Capacidad Máx."].map(h => (
+                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {netData?.edges?.map((edge: any, i: number) => (
                   <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
-                    <td className="px-5 py-3">
-                      <Badge label={r.type} variant="info" />
-                    </td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_in}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_out}</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-emerald-600">
-                      {r.excess}
-                    </td>
-                  </tr>
-                )) : networkNodes.map(r => (
-                  <tr key={r.node} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
-                    <td className="px-5 py-3">
-                      <Badge label={r.type} variant={r.type === "Source" ? "info" : r.type === "Sink" ? "warning" : "default"} />
-                    </td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_in}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_out}</td>
-                    <td className={`px-5 py-3 font-mono font-semibold ${r.excess > 0 ? "text-emerald-600" : r.excess < 0 ? "text-red-500" : "text-muted-foreground"}`}>
-                      {r.excess > 0 ? `+${r.excess}` : r.excess}
-                    </td>
+                    <td className="px-5 py-3 font-mono text-foreground">{edge.source.replace(/_/g, ' ')}</td>
+                    <td className="px-5 py-3 font-mono text-foreground">{edge.target.replace(/_/g, ' ')}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-primary">${edge.weight}</td>
+                    <td className="px-5 py-3 font-mono text-muted-foreground">{edge.capacity} u.</td>
                   </tr>
                 ))}
               </tbody>
@@ -942,18 +973,43 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
           </div>
         </Card>
 
+        {/* Flow Analysis Table */}
         <Card>
-          <SectionHeader title="Flow Over Time" sub="Network utilization — 6 periods" />
+          <SectionHeader title="Análisis de Flujo Óptimo" sub={`Costo total mínimo: $${totalCost.toLocaleString()}`} />
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Ruta Activa", "Flujo Enviado", "Costo Total de Ruta"].map(h => (
+                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {displayNodes ? displayNodes.map((r: any, i: number) => (
+                  <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-emerald-600">{r.excess} u.</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-primary">${r.cost.toLocaleString()}</td>
+                  </tr>
+                )) : null}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* Line Chart */}
+        <Card>
+          <SectionHeader title="Costos Acumulados por Ruta" sub="Progresión del costo al sumar las rutas óptimas" />
           <div className="p-4">
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={networkFlow} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+              <LineChart data={cumulativeData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
-                <XAxis dataKey="t" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
+                <XAxis dataKey="step" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTooltip dark={dark} />} />
-                <ReferenceLine y={200} stroke={dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)"} strokeDasharray="4 4" label={{ value: "Capacity", position: "right", fontSize: 10, fill: dark ? "#6B7280" : "#9CA3AF", fontFamily: "DM Mono" }} />
-                <Line type="monotone" dataKey="flowA" name="Arc A→B" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} dot={{ r: 3, fill: dark ? "#3B82F6" : "#1345A8" }} />
-                <Line type="monotone" dataKey="flowB" name="Arc C→D" stroke={dark ? "#0EA5E9" : "#0369A1"} strokeWidth={2} dot={{ r: 3, fill: dark ? "#0EA5E9" : "#0369A1" }} strokeDasharray="4 2" />
+                <Line type="monotone" dataKey="cumulative" name="Costo Acumulado" stroke={dark ? "#10B981" : "#059669"} strokeWidth={3} dot={{ r: 4, fill: dark ? "#10B981" : "#059669" }} />
+                <Line type="monotone" dataKey="cost" name="Costo Ruta" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} strokeDasharray="4 2" dot={{ r: 3, fill: dark ? "#3B82F6" : "#1345A8" }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

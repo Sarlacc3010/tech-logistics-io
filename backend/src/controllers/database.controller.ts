@@ -56,6 +56,16 @@ export async function updateModel(req: Request, res: Response, next: NextFunctio
       }
       solutionResult = await SolverClientService.solveTransport(data);
     } else if (model.type === 'NETWORKS') {
+      const { nodes, edges, demands, algorithm } = data;
+      if (!nodes || !edges || !demands) {
+        return res.status(400).json({ status: 'error', message: 'Faltan datos requeridos (nodes, edges, demands).' });
+      }
+      if (algorithm === 'min_cost_flow') {
+        const totalDemand = Object.values(demands).reduce((acc: number, val: any) => acc + Number(val), 0);
+        if (totalDemand !== 0) {
+          return res.status(400).json({ status: 'error', message: `El modelo está desbalanceado. La suma de oferta y demanda debe ser 0 (Oferta = Demanda), pero la diferencia neta es ${totalDemand}. Revisa los datos de los nodos.` });
+        }
+      }
       solutionResult = await SolverClientService.solveNetworks(data);
     } else if (model.type === 'DYNAMIC') {
       solutionResult = await SolverClientService.solveDynamic(data);
