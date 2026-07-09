@@ -8172,5 +8172,339 @@
       "action": null,
       "newModelData": null
     }
+  },
+  {
+    "id": "9noa5u5wm",
+    "timestamp": "2026-07-09T10:05:05.892Z",
+    "type": "groq_tutor",
+    "request": {
+      "body": {
+        "modelType": "lp",
+        "problemContext": "Active Module: lp. Model configuration: {}",
+        "mathematicalSolution": {},
+        "userMessage": "Configura un modelo de 2 variables para fabricar Sillas de madera y Mesas de roble, con una restricción de horas de trabajo y horas de ensamblaje. Por favor resuélvelo usando el método gráfico",
+        "chatHistory": [
+          {
+            "role": "model",
+            "text": "Módulo de Optimización de Recursos. ¿Deseas que analice los resultados o que evaluemos los ahorros potenciales de tus recursos?"
+          }
+        ],
+        "currentModelData": null
+      },
+      "query": {},
+      "params": {},
+      "url": "/api/tutor/ask",
+      "method": "POST"
+    },
+    "response": {
+      "status": "success",
+      "reply": "### Configuración del Modelo de Fabricación\n\n#### Variables de Decisión\n\n*   **Sillas de madera**: `sillas` (número de sillas fabricadas)\n*   **Mesas de roble**: `mesas` (número de mesas fabricadas)\n\n#### Restricciones\n\n*   **Horas de trabajo**: La suma de horas de trabajo en la fabricación de sillas y mesas no debe exceder 240 horas. `sillas * 10 + mesas * 15 <= 240`\n*   **Horas de ensamblaje**: La suma de horas de ensamblaje en la fabricación de sillas y mesas no debe exceder 120 horas. `sillas * 5 + mesas * 10 <= 120`\n\n#### Función Objetivo\n\nMaximizar la cantidad total de productos fabricados. `maximize: sillas + mesas`\n\n### Configuración del Modelo en el Interfaz\n\n```json\n{\n  \"variables\": {\n    \"sillas\": {\"isInteger\": true, \"lowBound\": 0},\n    \"mesas\": {\"isInteger\": true, \"lowBound\": 0}\n  },\n  \"restricciones\": {\n    \"horas_trabajo\": {\"lhs\": [\"sillas\", \"mesas\"], \"rhs\": 240, \"coefficients\": {\"sillas\": 10, \"mesas\": 15}, \"sign\": \"<=\"},\n    \"horas_ensamblaje\": {\"lhs\": [\"sillas\", \"mesas\"], \"rhs\": 120, \"coefficients\": {\"sillas\": 5, \"mesas\": 10}, \"sign\": \"<=\"}\n  },\n  \"funcion_objetivo\": {\"type\": \"maximize\", \"expr\": \"sillas + mesas\"}\n}\n```\n\n### Resolución del Modelo\n\nEl motor de Python utilizará el método gráfico para resolver el modelo. **No** intentes calcular la solución manualmente. En su lugar, presiona \"Resolver\" para obtener la solución óptima.\n\n### Resultados\n\nDespués de resolver el modelo, obtendremos los valores óptimos para `sillas` y `mesas` que satisfagan las restricciones y maximicen la función objetivo.",
+      "action": null,
+      "newModelData": null
+    }
+  },
+  {
+    "id": "mi2jutjs7",
+    "timestamp": "2026-07-09T10:07:35.828Z",
+    "type": "groq_tutor",
+    "request": {
+      "body": {
+        "modelType": "lp",
+        "problemContext": "Active Module: lp. Model configuration: {}",
+        "mathematicalSolution": {},
+        "userMessage": "Configura un modelo de 2 variables para fabricar Sillas de madera y Mesas de roble, con una restricción de horas de trabajo y horas de ensamblaje. Por favor resuélvelo usando el método gráfico.",
+        "chatHistory": [
+          {
+            "role": "model",
+            "text": "Módulo de Optimización de Recursos. ¿Deseas que analice los resultados o que evaluemos los ahorros potenciales de tus recursos?"
+          }
+        ],
+        "currentModelData": null
+      },
+      "query": {},
+      "params": {},
+      "url": "/api/tutor/ask",
+      "method": "POST"
+    },
+    "response": {
+      "status": "success",
+      "reply": "### Configuración del Modelo\n\n#### Variables de Decisión\n- **sillas**: cantidad de sillas de madera a fabricar\n- **mesas**: cantidad de mesas de roble a fabricar\n\n#### Restricciones\n- **Horas de trabajo**: No más de 120 horas de trabajo disponibles para fabricar sillas y mesas.\n- **Horas de ensamblaje**: No más de 80 horas de ensamblaje disponibles para montar sillas y mesas.\n\n#### Función Objetivo\n- **Maximizar beneficio**: Obtener el mayor beneficio posible fabricando sillas y mesas.\n\n#### Restricciones\n- **Horas de trabajo**: 2s + 3m ≤ 120 (donde s es la cantidad de sillas y m es la cantidad de mesas)\n- **Horas de ensamblaje**: s + 2m ≤ 80\n\n### Configuración del Modelo en la Interfaz\n\n```markdown\nModel configuration:\n{\n    \"variables\": [\n        {\"name\": \"sillas\", \"type\": \"continua\", \"lowBound\": 0, \"objCoef\": 10},\n        {\"name\": \"mesas\", \"type\": \"continua\", \"lowBound\": 0, \"objCoef\": 20}\n    ],\n    \"restricciones\": [\n        {\"type\": \"=\", \"rhs\": 120, \"coefficients\": {\"sillas\": 2, \"mesas\": 3}},\n        {\"type\": \"=\", \"rhs\": 80, \"coefficients\": {\"sillas\": 1, \"mesas\": 2}}\n    ],\n    \"funcionObjetivo\": \"maximize\",\n    \"algoritmo\": \"graphical\"\n}\n```\n\n### Presiona \"Resolver\"\n\nEl sistema calculará la solución óptima usando el método gráfico. Por favor, presiona \"Resolver\" para obtener la respuesta exacta.",
+      "action": null,
+      "newModelData": null
+    }
+  },
+  {
+    "id": "kdv2oo01w",
+    "timestamp": "2026-07-09T10:11:04.981Z",
+    "type": "groq_tutor",
+    "request": {
+      "body": {
+        "modelType": "LP",
+        "problemContext": "Active Module: lp. Model configuration: {\"objective\":\"maximize\",\"variables\":[{\"name\":\"x1\",\"objCoef\":5,\"upBound\":null,\"lowBound\":0,\"isInteger\":false},{\"name\":\"x2\",\"objCoef\":4,\"upBound\":48,\"lowBound\":0,\"isInteger\":false},{\"name\":\"x3\",\"objCoef\":3,\"upBound\":12,\"lowBound\":0,\"isInteger\":false}],\"constraints\":[{\"rhs\":240,\"name\":\"Labor_Hours\",\"operator\":\"<=\",\"coefficients\":{\"x1\":6,\"x2\":4,\"x3\":2}},{\"rhs\":270,\"name\":\"Raw_Material\",\"operator\":\"<=\",\"coefficients\":{\"x1\":3,\"x2\":2,\"x3\":5}},{\"rhs\":420,\"name\":\"Machine_Hours\",\"operator\":\"<=\",\"coefficients\":{\"x1\":5,\"x2\":6,\"x3\":5}}]}",
+        "mathematicalSolution": {
+          "id": "be71b566-8799-425d-8822-1287133fa5db",
+          "status": "Optimal",
+          "objectiveValue": 248,
+          "variables": [
+            {
+              "name": "x1",
+              "value": 4,
+              "reduced_cost": 0
+            },
+            {
+              "name": "x2",
+              "value": 48,
+              "reduced_cost": 0.66666667
+            },
+            {
+              "name": "x3",
+              "value": 12,
+              "reduced_cost": 1.3333333
+            }
+          ],
+          "constraints": [
+            {
+              "name": "Labor_Hours",
+              "slack": 0,
+              "rhsLow": 204,
+              "rhsHigh": 312,
+              "shadow_price": 0.83333333
+            },
+            {
+              "name": "Raw_Material",
+              "slack": 102,
+              "rhsLow": 168,
+              "rhsHigh": null,
+              "shadow_price": 0
+            },
+            {
+              "name": "Machine_Hours",
+              "slack": 52,
+              "rhsLow": 368,
+              "rhsHigh": null,
+              "shadow_price": 0
+            }
+          ],
+          "createdAt": "2026-07-09T10:10:16.871Z",
+          "modelId": "7cdff89e-4a35-406b-a887-0cfb4e3422fa"
+        },
+        "userMessage": "Configura un modelo de 2 variables para fabricar Sillas de madera y Mesas de roble, con una restricción de horas de trabajo y horas de ensamblaje. Por favor resuélvelo usando el método gráfico",
+        "chatHistory": [
+          {
+            "role": "model",
+            "text": "Módulo de Optimización de Recursos. ¿Deseas que analice los resultados o que evaluemos los ahorros potenciales de tus recursos?"
+          }
+        ],
+        "currentModelData": {
+          "objective": "maximize",
+          "variables": [
+            {
+              "name": "x1",
+              "objCoef": 5,
+              "upBound": null,
+              "lowBound": 0,
+              "isInteger": false
+            },
+            {
+              "name": "x2",
+              "objCoef": 4,
+              "upBound": 48,
+              "lowBound": 0,
+              "isInteger": false
+            },
+            {
+              "name": "x3",
+              "objCoef": 3,
+              "upBound": 12,
+              "lowBound": 0,
+              "isInteger": false
+            }
+          ],
+          "constraints": [
+            {
+              "rhs": 240,
+              "name": "Labor_Hours",
+              "operator": "<=",
+              "coefficients": {
+                "x1": 6,
+                "x2": 4,
+                "x3": 2
+              }
+            },
+            {
+              "rhs": 270,
+              "name": "Raw_Material",
+              "operator": "<=",
+              "coefficients": {
+                "x1": 3,
+                "x2": 2,
+                "x3": 5
+              }
+            },
+            {
+              "rhs": 420,
+              "name": "Machine_Hours",
+              "operator": "<=",
+              "coefficients": {
+                "x1": 5,
+                "x2": 6,
+                "x3": 5
+              }
+            }
+          ]
+        }
+      },
+      "query": {},
+      "params": {},
+      "url": "/api/tutor/ask",
+      "method": "POST"
+    },
+    "response": {
+      "status": "success",
+      "reply": "Tuve un problema de conexión con el servidor de Inteligencia Artificial o el análisis tomó demasiado tiempo. Por favor, intenta enviando tu mensaje nuevamente en unos segundos.",
+      "action": null,
+      "newModelData": null
+    }
+  },
+  {
+    "id": "2shedpppv",
+    "timestamp": "2026-07-09T10:11:12.886Z",
+    "type": "groq_tutor",
+    "request": {
+      "body": {
+        "modelType": "LP",
+        "problemContext": "Active Module: lp. Model configuration: {\"objective\":\"maximize\",\"variables\":[{\"name\":\"x1\",\"objCoef\":5,\"upBound\":null,\"lowBound\":0,\"isInteger\":false},{\"name\":\"x2\",\"objCoef\":4,\"upBound\":48,\"lowBound\":0,\"isInteger\":false},{\"name\":\"x3\",\"objCoef\":3,\"upBound\":12,\"lowBound\":0,\"isInteger\":false}],\"constraints\":[{\"rhs\":240,\"name\":\"Labor_Hours\",\"operator\":\"<=\",\"coefficients\":{\"x1\":6,\"x2\":4,\"x3\":2}},{\"rhs\":270,\"name\":\"Raw_Material\",\"operator\":\"<=\",\"coefficients\":{\"x1\":3,\"x2\":2,\"x3\":5}},{\"rhs\":420,\"name\":\"Machine_Hours\",\"operator\":\"<=\",\"coefficients\":{\"x1\":5,\"x2\":6,\"x3\":5}}]}",
+        "mathematicalSolution": {
+          "id": "be71b566-8799-425d-8822-1287133fa5db",
+          "status": "Optimal",
+          "objectiveValue": 248,
+          "variables": [
+            {
+              "name": "x1",
+              "value": 4,
+              "reduced_cost": 0
+            },
+            {
+              "name": "x2",
+              "value": 48,
+              "reduced_cost": 0.66666667
+            },
+            {
+              "name": "x3",
+              "value": 12,
+              "reduced_cost": 1.3333333
+            }
+          ],
+          "constraints": [
+            {
+              "name": "Labor_Hours",
+              "slack": 0,
+              "rhsLow": 204,
+              "rhsHigh": 312,
+              "shadow_price": 0.83333333
+            },
+            {
+              "name": "Raw_Material",
+              "slack": 102,
+              "rhsLow": 168,
+              "rhsHigh": null,
+              "shadow_price": 0
+            },
+            {
+              "name": "Machine_Hours",
+              "slack": 52,
+              "rhsLow": 368,
+              "rhsHigh": null,
+              "shadow_price": 0
+            }
+          ],
+          "createdAt": "2026-07-09T10:10:16.871Z",
+          "modelId": "7cdff89e-4a35-406b-a887-0cfb4e3422fa"
+        },
+        "userMessage": "Configura un modelo de 2 variables para fabricar Sillas de madera y Mesas de roble, con una restricción de horas de trabajo y horas de ensamblaje. Por favor resuélvelo usando el método gráfico",
+        "chatHistory": [
+          {
+            "role": "model",
+            "text": "Módulo de Optimización de Recursos. ¿Deseas que analice los resultados o que evaluemos los ahorros potenciales de tus recursos?"
+          },
+          {
+            "role": "user",
+            "text": "Configura un modelo de 2 variables para fabricar Sillas de madera y Mesas de roble, con una restricción de horas de trabajo y horas de ensamblaje. Por favor resuélvelo usando el método gráfico"
+          },
+          {
+            "role": "model",
+            "text": "Tuve un problema de conexión con el servidor de Inteligencia Artificial o el análisis tomó demasiado tiempo. Por favor, intenta enviando tu mensaje nuevamente en unos segundos."
+          }
+        ],
+        "currentModelData": {
+          "objective": "maximize",
+          "variables": [
+            {
+              "name": "x1",
+              "objCoef": 5,
+              "upBound": null,
+              "lowBound": 0,
+              "isInteger": false
+            },
+            {
+              "name": "x2",
+              "objCoef": 4,
+              "upBound": 48,
+              "lowBound": 0,
+              "isInteger": false
+            },
+            {
+              "name": "x3",
+              "objCoef": 3,
+              "upBound": 12,
+              "lowBound": 0,
+              "isInteger": false
+            }
+          ],
+          "constraints": [
+            {
+              "rhs": 240,
+              "name": "Labor_Hours",
+              "operator": "<=",
+              "coefficients": {
+                "x1": 6,
+                "x2": 4,
+                "x3": 2
+              }
+            },
+            {
+              "rhs": 270,
+              "name": "Raw_Material",
+              "operator": "<=",
+              "coefficients": {
+                "x1": 3,
+                "x2": 2,
+                "x3": 5
+              }
+            },
+            {
+              "rhs": 420,
+              "name": "Machine_Hours",
+              "operator": "<=",
+              "coefficients": {
+                "x1": 5,
+                "x2": 6,
+                "x3": 5
+              }
+            }
+          ]
+        }
+      },
+      "query": {},
+      "params": {},
+      "url": "/api/tutor/ask",
+      "method": "POST"
+    },
+    "response": {
+      "status": "success",
+      "reply": "Tuve un problema de conexión con el servidor de Inteligencia Artificial o el análisis tomó demasiado tiempo. Por favor, intenta enviando tu mensaje nuevamente en unos segundos.",
+      "action": null,
+      "newModelData": null
+    }
   }
 ]

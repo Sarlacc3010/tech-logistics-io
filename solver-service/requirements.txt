@@ -8,4 +8,5 @@ pydantic>=2.0.0
 chromadb
 sentence-transformers
 tqdm
+matplotlib>=3.7.0
 requests

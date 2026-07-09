@@ -12,7 +12,8 @@ const TutorRequestSchema = z.object({
       text: z.string()
     })
   ).optional(),
-  currentModelData: z.any().optional()
+  currentModelData: z.any().optional(),
+  modelType: z.string().optional()
 });
 
 export async function askTutor(req: Request, res: Response, next: NextFunction) {
@@ -26,14 +27,15 @@ export async function askTutor(req: Request, res: Response, next: NextFunction) 
       });
     }
 
-    const { problemContext, mathematicalSolution, userMessage, chatHistory, currentModelData } = parseResult.data;
+    const { problemContext, mathematicalSolution, userMessage, chatHistory, currentModelData, modelType } = parseResult.data;
 
     const result = await GroqService.generateSocraticResponse(
       problemContext,
       mathematicalSolution || {},
       userMessage,
       chatHistory || [],
-      currentModelData
+      currentModelData,
+      modelType
     );
 
     res.status(200).json({

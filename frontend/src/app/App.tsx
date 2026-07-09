@@ -615,14 +615,15 @@ function OverviewView({ dark }: { dark: boolean }) {
 
 function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const lpData = modelData?.data;
 
   const displaySolution = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
-    variable: v.name === 'x1' ? 'x₁ (Product A)' : v.name === 'x2' ? 'x₂ (Product B)' : v.name === 'x3' ? 'x₃ (Product C)' : v.name,
+    variable: v.name,
     value: v.value,
     reducedCost: v.reduced_cost ?? v.reducedCost ?? 0.0,
-    lower: v.lower ?? "—",
-    upper: v.upper ?? "—"
-  })) : lpSolution;
+    lower: v.lowerBound ?? v.lower ?? "—",
+    upper: v.upperBound ?? v.upper ?? "—"
+  })) : [];
 
   const displayConstraints = activeSolution && Array.isArray(activeSolution.constraints) ? activeSolution.constraints.map((c: any) => ({
     name: c.name.replace(/_/g, ' '),
@@ -630,100 +631,111 @@ function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
     shadowPrice: c.shadow_price ?? c.shadowPrice ?? 0.0,
     rhsLow: c.rhsLow ?? "—",
     rhsHigh: c.rhsHigh ?? "—"
-  })) : lpConstraints;
+  })) : [];
 
-  const objVal = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 24.68;
+  const objVal = activeSolution && activeSolution.objective_value !== undefined ? activeSolution.objective_value : (activeSolution?.objectiveValue || 0);
+
+  // Format Objective Function
+  let objText = "Configura tu modelo para empezar";
+  if (lpData?.objective && lpData?.variables) {
+    objText = `${lpData.objective === 'maximize' ? 'Maximizar' : 'Minimizar'} Z = ` + lpData.variables.map((v: any) => `${v.objCoef}${v.name}`).join(' + ');
+  }
+
+  // Format Constraints
+  const constraintsData = lpData?.constraints ? lpData.constraints.map((c: any, index: number) => {
+    const expr = Object.entries(c.coefficients || {}).map(([k, v]) => `${v}${k}`).join(' + ') + ` ${c.operator} ${c.rhs}`;
+    const slack = activeSolution ? displayConstraints[index]?.slack : null;
+    const isBinding = slack === 0;
+    const util = slack !== null && c.rhs !== 0 ? Math.round(Math.abs(((c.rhs - slack) / c.rhs)) * 100) + "%" : "N/A";
+    return { name: c.name, expr, util, binding: isBinding };
+  }) : [];
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <SectionHeader title="Problem Formulation" sub="Maximize Z = 5x₁ + 4x₂ + 3x₃ (weekly profit in $000s)" />
-        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[
-            { name: "Labor Hours", expr: "6x₁ + 4x₂ + 2x₃ ≤ 240", util: activeSolution ? (displayConstraints[0]?.slack === 0 ? "100%" : "91.2%") : "100%", binding: activeSolution ? displayConstraints[0]?.slack === 0 : true },
-            { name: "Raw Material", expr: "3x₁ + 2x₂ + 5x₃ ≤ 270", util: activeSolution ? (displayConstraints[1]?.slack === 0 ? "100%" : "95.4%") : "95.4%", binding: activeSolution ? displayConstraints[1]?.slack === 0 : false },
-            { name: "Machine Hours", expr: "5x₁ + 6x₂ + 5x₃ ≤ 420", util: activeSolution ? (displayConstraints[2]?.slack === 0 ? "100%" : "92.5%") : "100%", binding: activeSolution ? displayConstraints[2]?.slack === 0 : true },
-          ].map(c => (
-            <div key={c.name} className={`rounded-lg border p-3 ${c.binding ? (dark ? "border-blue-500/30 bg-blue-500/5" : "border-blue-700/20 bg-blue-50") : "border-border bg-secondary/30"}`}>
-              <p className="text-[10px] font-mono text-muted-foreground">{c.name}</p>
-              <p className="text-sm font-mono font-medium text-foreground mt-1">{c.expr}</p>
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-[10px] text-muted-foreground">Utilization</span>
-                <span className={`text-[10px] font-mono font-semibold ${c.binding ? "text-amber-500" : "text-emerald-500"}`}>{c.util}</span>
+        <SectionHeader title="Formulación del Modelo" sub={objText} />
+        {constraintsData.length > 0 && (
+          <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {constraintsData.map((c: any) => (
+              <div key={c.name} className={`rounded-lg border p-3 ${c.binding ? (dark ? "border-blue-500/30 bg-blue-500/5" : "border-blue-700/20 bg-blue-50") : "border-border bg-secondary/30"}`}>
+                <p className="text-[10px] font-mono text-muted-foreground">{c.name.replace(/_/g, ' ')}</p>
+                <p className="text-sm font-mono font-medium text-foreground mt-1">{c.expr}</p>
+                {activeSolution && (
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-[10px] text-muted-foreground">Uso de Capacidad</span>
+                    <span className={`text-[10px] font-mono font-semibold ${c.binding ? "text-amber-500" : "text-emerald-500"}`}>{c.util}</span>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </Card>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card>
-          <SectionHeader title="Optimal Solution" sub={`Simplex — Phase II complete · Z* = $${(objVal * 1000).toLocaleString()}`}
-            actions={<Badge label="OPTIMAL" variant="success" />}
-          />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Variable", "Value", "Reduced Cost", "Lower Bound", "Upper Bound"].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {displaySolution.map(r => (
-                  <tr key={r.variable} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-primary">{r.variable}</td>
-                    <td className="px-5 py-3 font-semibold text-foreground font-mono">{r.value.toFixed(2)}</td>
-                    <td className={`px-5 py-3 font-mono ${r.reducedCost < 0 ? "text-amber-500" : "text-muted-foreground"}`}>{r.reducedCost.toFixed(2)}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.lower}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.upper}</td>
+      {activeSolution && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Card>
+            <SectionHeader title="Solución Óptima" sub={`Valor Objetivo Z* = $${objVal.toLocaleString()}`}
+              actions={<Badge label="ÓPTIMO" variant="success" />}
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Variable", "Valor Final", "Costo Reducido", "Límite Inf.", "Límite Sup."].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {displaySolution.map((r: any) => (
+                    <tr key={r.variable} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-5 py-3 font-mono text-primary">{r.variable}</td>
+                      <td className="px-5 py-3 font-semibold text-foreground font-mono">{Number(r.value).toFixed(2)}</td>
+                      <td className={`px-5 py-3 font-mono ${r.reducedCost < 0 ? "text-amber-500" : "text-muted-foreground"}`}>{Number(r.reducedCost).toFixed(2)}</td>
+                      <td className="px-5 py-3 font-mono text-muted-foreground">{r.lower}</td>
+                      <td className="px-5 py-3 font-mono text-muted-foreground">{r.upper}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
 
-        <Card>
-          <SectionHeader title="Sensitivity Analysis" sub="Dual values & RHS ranging" />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Constraint", "Slack", "Shadow Price", "RHS Low", "RHS High"].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {displayConstraints.map(r => (
-                  <tr key={r.name} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 text-foreground">{r.name}</td>
-                    <td className={`px-5 py-3 font-mono ${r.slack === 0 ? "text-amber-500 font-semibold" : "text-emerald-600"}`}>{r.slack.toFixed(2)}</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-primary">${r.shadowPrice.toFixed(3)}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.rhsLow}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.rhsHigh}</td>
+          {activeSolution.graph_image && (
+            <Card>
+              <SectionHeader title="Visualización Gráfica" sub={`Método Gráfico (${lpData?.algorithm})`} />
+              <div className="p-4 flex justify-center">
+                <img src={activeSolution.graph_image} alt="Método Gráfico" className="max-w-full rounded border border-border" />
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <SectionHeader title="Análisis de Sensibilidad" sub="Precios Sombra y Holguras" />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Restricción", "Holgura (Slack)", "Precio Sombra"].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-mono text-muted-foreground mb-3 uppercase tracking-widest">RHS Ranging — Current vs. Feasible Range</p>
-            <ResponsiveContainer width="100%" height={120}>
-              <BarChart data={lpSensChart} layout="vertical" margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
-                <XAxis type="number" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="constraint" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} width={60} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTooltip dark={dark} />} />
-                <Bar dataKey="lower" name="Lower" fill={dark ? "rgba(59,130,246,0.2)" : "rgba(19,69,168,0.1)"} radius={[2,0,0,2]} />
-                <Bar dataKey="current" name="Current" fill={dark ? "#3B82F6" : "#1345A8"} radius={0} />
-                <Bar dataKey="upper" name="Upper" fill={dark ? "rgba(14,165,233,0.3)" : "rgba(3,105,161,0.15)"} radius={[0,2,2,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {displayConstraints.map((r: any) => (
+                    <tr key={r.name} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-5 py-3 text-foreground">{r.name}</td>
+                      <td className={`px-5 py-3 font-mono ${r.slack === 0 ? "text-amber-500 font-semibold" : "text-emerald-600"}`}>{Number(r.slack).toFixed(2)}</td>
+                      <td className="px-5 py-3 font-mono font-semibold text-primary">${Number(r.shadowPrice).toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
@@ -1292,6 +1304,7 @@ function AiTutor({ dark, activeModule, activeModelData, onUpdateModelData }: { d
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          modelType: activeModelData?.type || activeModule,
           problemContext,
           mathematicalSolution: solution,
           userMessage: text,

@@ -1,5 +1,6 @@
 import Groq from "groq-sdk";
 import { RagService } from "./rag.service";
+import { SOLVER_SOURCE_CODE } from "../constants/solverContext";
 
 export interface TutorResponse {
   reply: string;
@@ -11,7 +12,7 @@ const UPDATE_TOOL = {
   type: "function" as const,
   function: {
     name: "update_logistics_matrix",
-    description: "Actualiza la matriz de datos del modelo logístico activo. Usa esta herramienta SOLO cuando el usuario solicite explícitamente añadir, eliminar o modificar orígenes, destinos, costos, capacidades u otros datos del modelo. NUNCA la uses para responder preguntas informativas.",
+    description: "Actualiza la matriz de datos del modelo logístico o de Programación Lineal activo. Usa esta herramienta SOLO cuando el usuario solicite explícitamente añadir, eliminar o modificar orígenes, destinos, costos, variables, restricciones u otros datos del modelo. NUNCA la uses para responder preguntas informativas.",
     parameters: {
       type: "object",
       properties: {
@@ -35,13 +36,13 @@ export class GroqService {
     mathematicalSolution: any,
     userMessage: string,
     chatHistory: any[],
-    currentModelData?: any
+    currentModelData?: any,
+    modelType?: string
   ): Promise<TutorResponse> {
-    const apiKey = process.env.GROQ_API_KEY;
+    const apiKey = process.env.GROQ_API_KEY?.trim();
     if (!apiKey) {
-      throw new Error('GROQ_API_KEY is not defined in environment variables');
+      return { reply: "La API Key de Groq no está configurada en el servidor." };
     }
-
     const groq = new Groq({ apiKey });
 
     // RAG Search
@@ -76,17 +77,19 @@ REGLAS ABSOLUTAS DE COMUNICACIÓN (Romper estas reglas es inaceptable):
    - Usa tablas Markdown cuando compares rutas, costos o capacidades.
    - Usa listas con viñetas para recomendaciones.
    - Usa encabezados ### para secciones importantes.
-6. OBLIGATORIO responder en español.
+6. REGLA ANTI-ALUCINACIÓN: PROHIBIDO resolver problemas matemáticos o buscar rutas óptimas "mentalmente". No intentes aplicar Dijkstra, Simplex ni cálculos complejos por tu cuenta, ya que inventarás rutas falsas que no existen geográficamente. Si el usuario te pide calcular o resolver algo (ej. "¿cuál es la ruta más corta?"), DEBES indicarle que configure el modelo en la interfaz y presione "Resolver", para que el Motor de Python le dé la respuesta exacta. Tú solo interpretas la Solución Matemática Actual.
+7. OBLIGATORIO responder en español.
 
 ═══════════════════════════════════════════════
 REGLA DE VALIDACIÓN DE DATOS:
 ═══════════════════════════════════════════════
 
-Si el usuario te pide añadir, eliminar o modificar datos del modelo (orígenes, destinos, costos, capacidades):
-- Primero verifica que te ha dado TODA la información necesaria.
-- Para un nuevo origen: necesitas su nombre y su capacidad de oferta, y los costos de envío hacia CADA destino existente.
-- Para un nuevo destino: necesitas su nombre y su demanda, y los costos de envío desde CADA origen existente.
-- REGLA CRÍTICA: Si falta AL TÚ MENOS UN DATO (por ejemplo, el usuario olvidó la demanda), ESTÁ TOTALMENTE PROHIBIDO ejecutar la herramienta "update_logistics_matrix". NO LA USES. En su lugar, responde pidiendo el dato faltante.
+Si el usuario te pide añadir, eliminar o modificar datos del modelo:
+${modelType === 'LP' ? 
+  `- Para Programación Lineal: DEBES pedir las Variables de Decisión (nombre, límites inferior/superior, coeficiente de función objetivo) y las Restricciones (nombre, coeficientes por cada variable, operador <=/==/>=, y lado derecho o RHS).
+  - REGLA CRÍTICA: Si falta AL TÚ MENOS UN DATO (por ejemplo, el usuario olvidó el coeficiente o el lado derecho de la restricción), ESTÁ TOTALMENTE PROHIBIDO ejecutar la herramienta "update_logistics_matrix". En su lugar, responde pidiendo el dato faltante.` : 
+  `- Para Modelos de Redes Logísticas: necesitas el nombre del origen/destino, capacidad de oferta/demanda, y los costos de envío.
+  - REGLA CRÍTICA: Si falta AL TÚ MENOS UN DATO (por ejemplo, el usuario olvidó la demanda), ESTÁ TOTALMENTE PROHIBIDO ejecutar la herramienta "update_logistics_matrix". NO LA USES. En su lugar, responde pidiendo el dato faltante.`}
 - Solo si tienes todos los datos completos y exactos, usa la herramienta "update_logistics_matrix".
 
 ${isMathEmpty
@@ -101,6 +104,13 @@ ${JSON.stringify(mathematicalSolution, null, 2)}
 
 ${hasModelData ? `Datos Actuales del Modelo (usa esto como base para modificaciones):\n${JSON.stringify(currentModelData, null, 2)}` : ""}
 ${ragContext}
+
+═══════════════════════════════════════════════
+DOCUMENTACIÓN DEL SISTEMA (CÓDIGO FUENTE REAL)
+═══════════════════════════════════════════════
+Utiliza el siguiente código fuente del servidor matemático en Python para entender exactamente cómo se resuelven los problemas (con PuLP y NetworkX). Basa tus sugerencias y análisis en estos métodos exactos que el sistema tiene implementados para evitar alucinaciones:
+
+${SOLVER_SOURCE_CODE}
 `;
 
     const formattedHistory = chatHistory.map(msg => ({
@@ -120,8 +130,8 @@ ${ragContext}
         model: "llama-3.1-8b-instant",
         temperature: 0.5,
         max_tokens: 4000,
-        tools: hasModelData ? [UPDATE_TOOL] : undefined,
-        tool_choice: hasModelData ? "auto" : undefined,
+        tools: [UPDATE_TOOL],
+        tool_choice: "auto",
       });
 
       const choice = chatCompletion.choices[0];
