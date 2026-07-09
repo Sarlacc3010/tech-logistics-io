@@ -621,124 +621,182 @@ function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
     variable: v.name,
     value: v.value,
     reducedCost: v.reduced_cost ?? v.reducedCost ?? 0.0,
-    lower: v.lowerBound ?? v.lower ?? "—",
-    upper: v.upperBound ?? v.upper ?? "—"
   })) : [];
 
   const displayConstraints = activeSolution && Array.isArray(activeSolution.constraints) ? activeSolution.constraints.map((c: any) => ({
     name: c.name.replace(/_/g, ' '),
     slack: c.slack,
     shadowPrice: c.shadow_price ?? c.shadowPrice ?? 0.0,
-    rhsLow: c.rhsLow ?? "—",
-    rhsHigh: c.rhsHigh ?? "—"
   })) : [];
 
-  const objVal = activeSolution && activeSolution.objective_value !== undefined ? activeSolution.objective_value : (activeSolution?.objectiveValue || 0);
+  const objVal = activeSolution && activeSolution.objective_value !== undefined
+    ? activeSolution.objective_value
+    : (activeSolution?.objectiveValue || 0);
 
-  // Format Objective Function
-  let objText = "Configura tu modelo para empezar";
-  if (lpData?.objective && lpData?.variables) {
-    objText = `${lpData.objective === 'maximize' ? 'Maximizar' : 'Minimizar'} Z = ` + lpData.variables.map((v: any) => `${v.objCoef}${v.name}`).join(' + ');
-  }
+  const isMaximize = lpData?.objective === 'maximize';
 
-  // Format Constraints
   const constraintsData = lpData?.constraints ? lpData.constraints.map((c: any, index: number) => {
-    const expr = Object.entries(c.coefficients || {}).map(([k, v]) => `${v}${k}`).join(' + ') + ` ${c.operator} ${c.rhs}`;
-    const slack = activeSolution ? displayConstraints[index]?.slack : null;
+    const expr = Object.entries(c.coefficients || {}).map(([k, v]) => `${v} × ${k}`).join(' + ') + ` ${c.operator} ${c.rhs}`;
+    const slack = activeSolution && displayConstraints[index] ? displayConstraints[index].slack : null;
     const isBinding = slack === 0;
-    const util = slack !== null && c.rhs !== 0 ? Math.round(Math.abs(((c.rhs - slack) / c.rhs)) * 100) + "%" : "N/A";
+    const util = slack !== null && c.rhs !== 0 ? Math.round(Math.abs(((c.rhs - slack) / c.rhs)) * 100) : null;
     return { name: c.name, expr, util, binding: isBinding };
   }) : [];
 
   return (
     <div className="flex flex-col gap-4">
+
+      {/* Formulación del Modelo */}
       <Card>
-        <SectionHeader title="Formulación del Modelo" sub={objText} />
-        {constraintsData.length > 0 && (
-          <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {constraintsData.map((c: any) => (
-              <div key={c.name} className={`rounded-lg border p-3 ${c.binding ? (dark ? "border-blue-500/30 bg-blue-500/5" : "border-blue-700/20 bg-blue-50") : "border-border bg-secondary/30"}`}>
-                <p className="text-[10px] font-mono text-muted-foreground">{c.name.replace(/_/g, ' ')}</p>
-                <p className="text-sm font-mono font-medium text-foreground mt-1">{c.expr}</p>
-                {activeSolution && (
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-[10px] text-muted-foreground">Uso de Capacidad</span>
-                    <span className={`text-[10px] font-mono font-semibold ${c.binding ? "text-amber-500" : "text-emerald-500"}`}>{c.util}</span>
-                  </div>
-                )}
+        <SectionHeader
+          title="Formulación del Modelo"
+          sub={lpData?.objective ? `Objetivo: ${isMaximize ? 'Maximizar' : 'Minimizar'} el valor total` : "Configura tu modelo para empezar"}
+        />
+        {lpData?.variables && lpData.variables.length > 0 && (
+          <div className="px-5 pb-4">
+            <div className="mb-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
+              <p className="text-[10px] font-semibold text-primary uppercase tracking-widest mb-1">Función Objetivo</p>
+              <p className="text-sm font-medium text-foreground">
+                {isMaximize ? '📈 Maximizar: ' : '📉 Minimizar: '}
+                {lpData.variables.map((v: any, i: number) => (
+                  <span key={v.name}>
+                    {i > 0 && ' + '}
+                    <span className="font-bold text-primary">{v.objCoef}</span>
+                    <span className="text-foreground"> × {v.name}</span>
+                  </span>
+                ))}
+              </p>
+            </div>
+            {constraintsData.length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">Restricciones del Modelo</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {constraintsData.map((c: any) => (
+                    <div key={c.name} className={`rounded-lg border p-3 ${
+                      c.binding
+                        ? (dark ? 'border-amber-500/40 bg-amber-500/5' : 'border-amber-600/20 bg-amber-50')
+                        : 'border-border bg-secondary/30'
+                    }`}>
+                      <p className="text-[10px] font-semibold text-muted-foreground mb-1">{c.name.replace(/_/g, ' ')}</p>
+                      <p className="text-xs font-mono text-foreground">{c.expr}</p>
+                      {c.util !== null && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex-1 h-1 rounded-full bg-border">
+                            <div
+                              className={`h-full rounded-full ${c.binding ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                              style={{ width: `${Math.min(c.util, 100)}%` }}
+                            />
+                          </div>
+                          <span className={`text-[10px] font-bold ${c.binding ? 'text-amber-500' : 'text-emerald-500'}`}>{c.util}%</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            )}
           </div>
         )}
       </Card>
 
+      {/* Resultados */}
       {activeSolution && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <>
+          {/* Banner objetivo */}
+          <div className={`rounded-xl border p-5 flex items-center justify-between ${
+            dark ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-emerald-600/20 bg-emerald-50'
+          }`}>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">🏆 Resultado Óptimo Encontrado</p>
+              <p className="text-2xl font-bold text-foreground">
+                {isMaximize ? 'Ganancia Máxima' : 'Costo Mínimo'}:
+                <span className="text-emerald-500 ml-2">${Number(objVal).toLocaleString('es-EC', { minimumFractionDigits: 2 })}</span>
+              </p>
+            </div>
+            <Badge label="ÓPTIMO" variant="success" />
+          </div>
+
+          {/* Tarjetas de producción */}
           <Card>
-            <SectionHeader title="Solución Óptima" sub={`Valor Objetivo Z* = $${objVal.toLocaleString()}`}
-              actions={<Badge label="ÓPTIMO" variant="success" />}
-            />
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border">
-                    {["Variable", "Valor Final", "Costo Reducido", "Límite Inf.", "Límite Sup."].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {displaySolution.map((r: any) => (
-                    <tr key={r.variable} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-5 py-3 font-mono text-primary">{r.variable}</td>
-                      <td className="px-5 py-3 font-semibold text-foreground font-mono">{Number(r.value).toFixed(2)}</td>
-                      <td className={`px-5 py-3 font-mono ${r.reducedCost < 0 ? "text-amber-500" : "text-muted-foreground"}`}>{Number(r.reducedCost).toFixed(2)}</td>
-                      <td className="px-5 py-3 font-mono text-muted-foreground">{r.lower}</td>
-                      <td className="px-5 py-3 font-mono text-muted-foreground">{r.upper}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <SectionHeader title="Plan de Producción Óptimo" sub="Cantidad recomendada a producir de cada recurso" />
+            <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {displaySolution.map((r: any) => {
+                const isActive = Number(r.value) > 0;
+                return (
+                  <div key={r.variable} className={`rounded-xl border p-4 flex flex-col gap-2 ${
+                    isActive
+                      ? (dark ? 'border-primary/40 bg-primary/5' : 'border-blue-400/30 bg-blue-50')
+                      : 'border-border bg-secondary/20 opacity-60'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-foreground">{r.variable}</p>
+                      {isActive
+                        ? <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">✓ Producir</span>
+                        : <span className="text-[10px] font-bold text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">No producir</span>
+                      }
+                    </div>
+                    <p className="text-3xl font-bold text-primary">{Number(r.value).toFixed(0)}
+                      <span className="text-sm font-normal text-muted-foreground ml-1">unidades</span>
+                    </p>
+                    {Number(r.reducedCost) < 0 && (
+                      <p className="text-[10px] text-amber-500">⚠ Forzar producción reduciría la ganancia en ${Math.abs(Number(r.reducedCost)).toFixed(2)}/unidad</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Card>
 
+          {/* Gráfica del método gráfico */}
           {activeSolution.graph_image && (
             <Card>
-              <SectionHeader title="Visualización Gráfica" sub={`Método Gráfico (${lpData?.algorithm})`} />
+              <SectionHeader title="Visualización Gráfica" sub="Región factible y punto óptimo en el plano cartesiano" />
               <div className="p-4 flex justify-center">
-                <img src={activeSolution.graph_image} alt="Método Gráfico" className="max-w-full rounded border border-border" />
+                <img src={activeSolution.graph_image} alt="Método Gráfico" className="max-w-full rounded-lg border border-border shadow-md" />
               </div>
             </Card>
           )}
 
+          {/* Estado de restricciones - amigable */}
           <Card>
-            <SectionHeader title="Análisis de Sensibilidad" sub="Precios Sombra y Holguras" />
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border">
-                    {["Restricción", "Holgura (Slack)", "Precio Sombra"].map(h => (
-                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {displayConstraints.map((r: any) => (
-                    <tr key={r.name} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-5 py-3 text-foreground">{r.name}</td>
-                      <td className={`px-5 py-3 font-mono ${r.slack === 0 ? "text-amber-500 font-semibold" : "text-emerald-600"}`}>{Number(r.slack).toFixed(2)}</td>
-                      <td className="px-5 py-3 font-mono font-semibold text-primary">${Number(r.shadowPrice).toFixed(3)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <SectionHeader title="Estado de los Recursos" sub="Cuánta capacidad disponible queda en cada limitación del modelo" />
+            <div className="px-5 pb-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {displayConstraints.map((r: any) => {
+                const isBinding = r.slack === 0;
+                const savingValue = Math.abs(Number(r.shadowPrice));
+                return (
+                  <div key={r.name} className={`rounded-xl border p-4 ${
+                    isBinding
+                      ? (dark ? 'border-amber-500/40 bg-amber-500/5' : 'border-amber-400/30 bg-amber-50')
+                      : 'border-border bg-secondary/20'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-semibold text-foreground">{r.name}</p>
+                      {isBinding
+                        ? <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">⚠ Recurso Agotado</span>
+                        : <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">✓ Hay Margen</span>
+                      }
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Capacidad libre: <span className="font-semibold text-foreground">{Number(r.slack).toFixed(1)} unidades sin usar</span>
+                    </p>
+                    {savingValue > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        💡 Ampliar este recurso en 1 unidad {isMaximize ? 'aumentaría la ganancia' : 'reduciría el costo'} en
+                        <span className="font-semibold text-primary ml-1">${savingValue.toFixed(3)}</span>
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Card>
-        </div>
+        </>
       )}
     </div>
   );
 }
+
 
 function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];

@@ -17,15 +17,11 @@ const UPDATE_TOOL = {
       type: "object",
       properties: {
         updated_data: {
-          type: "string",
-          description: "El JSON completo actualizado del modelo, incluyendo TODOS los datos anteriores más las modificaciones solicitadas. Debe ser un JSON válido y parseable."
-        },
-        summary: {
-          type: "string",
-          description: "Un breve resumen en español de los cambios realizados al modelo, en lenguaje de negocios."
+          type: "object",
+          description: "El JSON completo actualizado del modelo, incluyendo TODOS los datos anteriores más las modificaciones solicitadas."
         }
       },
-      required: ["updated_data", "summary"]
+      required: ["updated_data"]
     }
   }
 };
@@ -79,6 +75,7 @@ REGLAS ABSOLUTAS DE COMUNICACIÓN (Romper estas reglas es inaceptable):
    - Usa encabezados ### para secciones importantes.
 6. REGLA ANTI-ALUCINACIÓN: PROHIBIDO resolver problemas matemáticos o buscar rutas óptimas "mentalmente". No intentes aplicar Dijkstra, Simplex ni cálculos complejos por tu cuenta, ya que inventarás rutas falsas que no existen geográficamente. Si el usuario te pide calcular o resolver algo (ej. "¿cuál es la ruta más corta?"), DEBES indicarle que configure el modelo en la interfaz y presione "Resolver", para que el Motor de Python le dé la respuesta exacta. Tú solo interpretas la Solución Matemática Actual.
 7. OBLIGATORIO responder en español.
+8. PROHIBIDO ESCRIBIR CÓDIGO PYTHON O JSON EN EL CHAT: Si el usuario te pide configurar, crear o modificar un modelo, NUNCA escribas código Python ni bloques JSON en tu respuesta. ESTÁ TOTALMENTE PROHIBIDO. DEBES usar SIEMPRE la herramienta 'update_logistics_matrix' internamente para inyectar los datos en la interfaz.
 
 ═══════════════════════════════════════════════
 REGLA DE VALIDACIÓN DE DATOS:
@@ -87,6 +84,8 @@ REGLA DE VALIDACIÓN DE DATOS:
 Si el usuario te pide añadir, eliminar o modificar datos del modelo:
 ${modelType === 'LP' ? 
   `- Para Programación Lineal: DEBES pedir las Variables de Decisión (nombre, límites inferior/superior, coeficiente de función objetivo) y las Restricciones (nombre, coeficientes por cada variable, operador <=/==/>=, y lado derecho o RHS).
+  - REGLA CRÍTICA DE NOMBRES: ESTÁ ABSOLUTAMENTE PROHIBIDO usar nombres genéricos como "x1", "x2", "x3", "x", "y", "z" como nombres de variables. DEBES usar siempre el nombre real del producto o recurso (ej: "Sillas", "Mesas", "Producto_A"). Si el usuario menciona un nombre real, úsalo. Si no lo menciona, inventa un nombre descriptivo.
+  - REGLA CRÍTICA DE LIMPIEZA: Cuando el usuario pida crear un NUEVO modelo, el JSON que envíes debe contener ÚNICAMENTE las variables y restricciones del nuevo modelo. BORRA completamente cualquier variable o restricción anterior. No mezcles modelos viejos con nuevos.
   - REGLA CRÍTICA: Si falta AL TÚ MENOS UN DATO (por ejemplo, el usuario olvidó el coeficiente o el lado derecho de la restricción), ESTÁ TOTALMENTE PROHIBIDO ejecutar la herramienta "update_logistics_matrix". En su lugar, responde pidiendo el dato faltante.` : 
   `- Para Modelos de Redes Logísticas: necesitas el nombre del origen/destino, capacidad de oferta/demanda, y los costos de envío.
   - REGLA CRÍTICA: Si falta AL TÚ MENOS UN DATO (por ejemplo, el usuario olvidó la demanda), ESTÁ TOTALMENTE PROHIBIDO ejecutar la herramienta "update_logistics_matrix". NO LA USES. En su lugar, responde pidiendo el dato faltante.`}
@@ -111,6 +110,9 @@ DOCUMENTACIÓN DEL SISTEMA (CÓDIGO FUENTE REAL)
 Utiliza el siguiente código fuente del servidor matemático en Python para entender exactamente cómo se resuelven los problemas (con PuLP y NetworkX). Basa tus sugerencias y análisis en estos métodos exactos que el sistema tiene implementados para evitar alucinaciones:
 
 ${SOLVER_SOURCE_CODE}
+
+!!! INSTRUCCIÓN FINAL OBLIGATORIA !!!
+Si el usuario te ha pedido configurar, crear o modificar el modelo (ej. variables, restricciones), TIENES PROHIBIDO escribir la respuesta en texto. DEBES usar obligatoriamente la función 'update_logistics_matrix' haciendo una llamada a herramienta (tool call) con el JSON.
 `;
 
     const formattedHistory = chatHistory.map(msg => ({
@@ -124,14 +126,20 @@ ${SOLVER_SOURCE_CODE}
       { role: 'user', content: userMessage }
     ];
 
+    // Dynamic tool choice
+    const isModificationRequest = /configura|añad|crea|cambi|modific|agreg|pon|haz/i.test(userMessage);
+    const dynamicToolChoice = isModificationRequest 
+      ? { type: "function" as const, function: { name: "update_logistics_matrix" } } 
+      : "auto";
+
     try {
       const chatCompletion = await groq.chat.completions.create({
         messages: messages,
         model: "llama-3.1-8b-instant",
-        temperature: 0.5,
-        max_tokens: 4000,
+        temperature: 0.1,
+        max_tokens: 2000,
         tools: [UPDATE_TOOL],
-        tool_choice: "auto",
+        tool_choice: dynamicToolChoice,
       });
 
       const choice = chatCompletion.choices[0];
@@ -143,7 +151,9 @@ ${SOLVER_SOURCE_CODE}
         if (toolCall.function.name === "update_logistics_matrix") {
           try {
             const args = JSON.parse(toolCall.function.arguments);
-            const updatedData = JSON.parse(args.updated_data);
+            const updatedData = typeof args.updated_data === 'string' 
+              ? JSON.parse(args.updated_data) 
+              : args.updated_data;
             const summary = args.summary || "Datos actualizados correctamente.";
 
             // Build a nice reply with the summary
@@ -165,12 +175,64 @@ ${SOLVER_SOURCE_CODE}
         }
       }
 
-      // Normal text response (no tool call)
+      // Fallback: If LLM hallucinated the tool call as a JSON block in text
+      let content = message?.content || "Lo siento, no pude procesar tu solicitud.";
+      
+      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/(\{[\s\S]*\})/);
+      
+      if (jsonMatch && jsonMatch[1]) {
+        try {
+          const possibleData = JSON.parse(jsonMatch[1]);
+          if (possibleData.variables || possibleData.updated_data || possibleData.objective) {
+            const updatedData = possibleData.updated_data 
+              ? (typeof possibleData.updated_data === 'string' ? JSON.parse(possibleData.updated_data) : possibleData.updated_data) 
+              : possibleData;
+              
+            return {
+              reply: content.replace(jsonMatch[0], '') + "\n\n✅ **Actualización inyectada.**",
+              action: "UPDATE_MODEL",
+              newModelData: updatedData
+            };
+          }
+        } catch (e) {
+          console.error("Fallback JSON parse error", e);
+        }
+      }
+
+      // Normal text response
       return {
-        reply: message?.content || "Lo siento, no pude procesar tu solicitud."
+        reply: content
       };
     } catch (groqError: any) {
       console.error("Groq API Error:", groqError);
+      
+      // The 8B model sometimes outputs the function call as XML-style tags instead of JSON
+      // Groq rejects it with 400, but we can recover the JSON from the failed_generation field
+      const failedGen = groqError?.error?.error?.failed_generation as string | undefined;
+      if (failedGen) {
+        // Try to extract JSON between <function=...> and </function> or <function>
+        const fnMatch = failedGen.match(/<function=update_logistics_matrix>(\{[\s\S]*?\})(?:<\/function>|<function>|$)/);
+        if (fnMatch && fnMatch[1]) {
+          try {
+            const parsedArgs = JSON.parse(fnMatch[1]);
+            const updatedData = parsedArgs.updated_data 
+              ? (typeof parsedArgs.updated_data === 'string' ? JSON.parse(parsedArgs.updated_data) : parsedArgs.updated_data)
+              : parsedArgs;
+            
+            if (updatedData.variables || updatedData.objective) {
+              console.log("✅ Recovered model data from failed_generation XML tag");
+              return {
+                reply: "✅ **Modelo configurado correctamente.** Presiona **Resolver** para obtener la solución óptima.",
+                action: "UPDATE_MODEL",
+                newModelData: updatedData
+              };
+            }
+          } catch (e) {
+            console.error("Failed to parse failed_generation:", e);
+          }
+        }
+      }
+      
       return {
         reply: "Tuve un problema de conexión con el servidor de Inteligencia Artificial o el análisis tomó demasiado tiempo. Por favor, intenta enviando tu mensaje nuevamente en unos segundos."
       };
