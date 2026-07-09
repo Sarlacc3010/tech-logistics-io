@@ -18,13 +18,13 @@ export class GroqService {
     // RAG Search
     let ragContext = "";
     if (RagService.hasDocuments()) {
-      const relevantChunks = await RagService.search(userMessage, 3);
+      const relevantChunks = await RagService.search(userMessage, 5);
       if (relevantChunks.length > 0) {
         ragContext = `\nContexto Adicional (Extraído de los documentos PDF del usuario):\n`;
         relevantChunks.forEach((chunk, index) => {
           ragContext += `[Fragmento ${index + 1}]: ${chunk}\n`;
         });
-        ragContext += `\nInstrucción RAG: Utiliza el 'Contexto Adicional' anterior para responder la pregunta del usuario si es relevante. Si no es relevante, ignóralo.\n`;
+        ragContext += `\nInstrucción RAG: Utiliza el 'Contexto Adicional' anterior para responder la pregunta del usuario. DEBES extraer y mencionar explícitamente los nombres exactos de ciudades, fábricas, capacidades o costos que aparezcan en los fragmentos para que tu respuesta sea 100% personalizada a su caso.\n`;
       }
     }
 
@@ -40,7 +40,7 @@ REGLAS CRÍTICAS DE ARQUITECTURA (Síguelas al pie de la letra):
 4. El tono debe ser directo, ejecutivo, profesional y orientado a la toma de decisiones.
 
 ${isMathEmpty 
-  ? "ESTADO ACTUAL: El usuario AÚN NO ha ejecutado el motor matemático (la matriz está vacía). Tu objetivo ahora es actuar como Consultor Estratégico. Usa el Contexto Adicional (RAG) para sugerirle qué modelo matemático usar, cómo estructurar sus datos, o responder sus preguntas logísticas basándote estrictamente en los documentos que subió. NUNCA le digas 'la solución está vacía' ni te quejes de falta de datos; ayúdalo a empezar."
+  ? "ESTADO ACTUAL: El usuario AÚN NO ha ejecutado el motor matemático (la matriz está vacía). Tu objetivo ahora es actuar como Consultor Estratégico. Usa el Contexto Adicional (RAG) para sugerirle qué modelo usar y CÓMO ESTRUCTURARLO CON SUS DATOS EXACTOS. Identifica en el documento las plantas, los centros de distribución y las capacidades, y menciónalos por su nombre en tu respuesta. NUNCA des una respuesta de libro de texto genérica; aplica la teoría a su PDF."
   : "ESTADO ACTUAL: El usuario acaba de ejecutar el motor matemático. Tu objetivo es traducir la solución numérica exacta del JSON en un resumen de negocio accionable. Dinos cuántos pallets fabricar, cuánto dinero se ahorra, o qué rutas usar explícitamente."}
 
 Contexto del Problema (Interfaz):
