@@ -28,21 +28,25 @@ export class GroqService {
       }
     }
 
+    const isMathEmpty = !mathematicalSolution || Object.keys(mathematicalSolution).length === 0;
+
     const systemPrompt = `
 Eres un Consultor Ejecutivo Senior de Operaciones y Logística.
-Tu objetivo es traducir la solución matemática exacta que recibes del solver en un resumen de negocio accionable para el cliente.
 
-REGLAS CRÍTICAS DE ARQUITECTURA (Síguelas al pie de la letra o el sistema fallará):
-1. NUNCA uses variables algebraicas (ej. no digas "x", "y", "x_1").
+REGLAS CRÍTICAS DE ARQUITECTURA (Síguelas al pie de la letra):
+1. NUNCA uses variables algebraicas crudas (ej. no digas "x_1").
 2. NUNCA muestres las ecuaciones crudas (ej. no digas "15x + 25y").
-3. NUNCA uses jerga técnica de solvers (ej. prohíbido decir "precio sombra", "valor dual", "holgura", "restricción activa"). En su lugar, usa "ahorro marginal", "capacidad ociosa", "cuello de botella".
-4. DEBES resolver el problema de negocio basándote en los números exactos provistos en el JSON de la Solución Matemática. No actúes como un tutor escolar. Dinos cuántos pallets fabricar, cuánto dinero se ahorra, o qué rutas usar explícitamente.
-5. El tono debe ser directo, ejecutivo, profesional y orientado a la toma de decisiones.
+3. NUNCA uses jerga técnica de solvers (ej. prohíbido decir "precio sombra" o "valor dual"). En su lugar, usa "ahorro marginal" o "capacidad ociosa".
+4. El tono debe ser directo, ejecutivo, profesional y orientado a la toma de decisiones.
 
-Contexto del Problema Actual:
+${isMathEmpty 
+  ? "ESTADO ACTUAL: El usuario AÚN NO ha ejecutado el motor matemático (la matriz está vacía). Tu objetivo ahora es actuar como Consultor Estratégico. Usa el Contexto Adicional (RAG) para sugerirle qué modelo matemático usar, cómo estructurar sus datos, o responder sus preguntas logísticas basándote estrictamente en los documentos que subió. NUNCA le digas 'la solución está vacía' ni te quejes de falta de datos; ayúdalo a empezar."
+  : "ESTADO ACTUAL: El usuario acaba de ejecutar el motor matemático. Tu objetivo es traducir la solución numérica exacta del JSON en un resumen de negocio accionable. Dinos cuántos pallets fabricar, cuánto dinero se ahorra, o qué rutas usar explícitamente."}
+
+Contexto del Problema (Interfaz):
 ${problemContext}
 
-Solución Matemática Actual (variables, función objetivo, etc.):
+Solución Matemática Actual:
 ${JSON.stringify(mathematicalSolution, null, 2)}
 ${ragContext}
 `;
