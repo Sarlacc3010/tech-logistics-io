@@ -4,6 +4,11 @@ from typing import List, Optional
 import numpy as np
 import pulp
 
+from app.algorithms.transport.utils import balance_transport_problem
+from app.algorithms.transport.northwest import northwest_corner
+from app.algorithms.transport.min_cost import min_cost
+from app.algorithms.transport.vogel import vogel
+
 router = APIRouter()
 
 class TransportProblemInput(BaseModel):
@@ -19,18 +24,24 @@ class RouteAllocation(BaseModel):
     units: float
     cost: float
 
+class TransportMethodResult(BaseModel):
+    method: str
+    total_cost: float
+    allocations: List[RouteAllocation]
+
 class TransportSolutionOutput(BaseModel):
     status: str
     total_cost: float
     allocations: List[RouteAllocation]
+    comparisons: Optional[List[TransportMethodResult]] = None
 
 @router.post("/solve", response_model=TransportSolutionOutput)
 def solve_transport(payload: TransportProblemInput):
     try:
-        # Validate inputs using NumPy
-        cost_matrix = np.array(payload.costs)
+        # Validate inputs
         n_origins = len(payload.origins)
         n_destinations = len(payload.destinations)
+        cost_matrix = np.array(payload.costs)
         
         if cost_matrix.shape != (n_origins, n_destinations):
             raise HTTPException(
@@ -38,7 +49,26 @@ def solve_transport(payload: TransportProblemInput):
                 detail=f"Costs matrix shape {cost_matrix.shape} must match origins ({n_origins}) and destinations ({n_destinations})"
             )
             
-        # Model transport problem in PuLP
+        # Balance the problem for initial methods
+        bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations = balance_transport_problem(
+            payload.supply, payload.demand, payload.costs
+        )
+        
+        # Calculate initial solutions
+        comparisons = []
+        try:
+            res_nw = northwest_corner(bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations)
+            comparisons.append(TransportMethodResult(**res_nw))
+            
+            res_mc = min_cost(bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations)
+            comparisons.append(TransportMethodResult(**res_mc))
+            
+            res_vo = vogel(bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations)
+            comparisons.append(TransportMethodResult(**res_vo))
+        except Exception as e:
+            print(f"Warning: Failed to compute initial methods: {e}")
+            
+        # Model transport problem in PuLP for optimal solution
         prob = pulp.LpProblem("Transportation_Problem", pulp.LpMinimize)
         
         # Decision variables
@@ -79,7 +109,8 @@ def solve_transport(payload: TransportProblemInput):
         return TransportSolutionOutput(
             status=status_str,
             total_cost=pulp.value(prob.objective),
-            allocations=allocations
+            allocations=allocations,
+            comparisons=comparisons
         )
         
     except HTTPException as he:

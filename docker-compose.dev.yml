@@ -5,6 +5,10 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    command: npm run dev
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
     ports:
       - "4000:4000"
     environment:
@@ -19,11 +23,16 @@ services:
       - mongodb
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: node:18-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     ports:
-      - "5173:80"
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:4000/api
     depends_on:
       - backend
 
@@ -31,6 +40,9 @@ services:
     build:
       context: ./solver-service
       dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./solver-service:/app
     ports:
       - "8000:8000"
     environment:
@@ -38,7 +50,7 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    container_name: tech_logistics_postgres
+    container_name: tech_logistics_postgres_dev
     restart: always
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
@@ -47,20 +59,17 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_dev:/var/lib/postgresql/data
 
   mongodb:
     image: mongo:6
-    container_name: tech_logistics_mongodb
+    container_name: tech_logistics_mongodb_dev
     restart: always
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-mongo_admin}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-mongo_password}
     ports:
       - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
 
 volumes:
-  postgres_data:
-  mongo_data:
+  postgres_data_dev:

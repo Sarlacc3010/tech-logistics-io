@@ -1,22 +1,24 @@
 import { Request, Response, NextFunction } from 'express';
-import { GeminiService } from '../services/gemini.service';
+import { GroqService } from '../services/groq.service';
 import { z } from 'zod';
 
-const GeminiRequestSchema = z.object({
+const TutorRequestSchema = z.object({
   problemContext: z.string(),
   mathematicalSolution: z.any().optional(),
   userMessage: z.string(),
   chatHistory: z.array(
     z.object({
-      role: z.enum(['user', 'model']),
+      role: z.enum(['user', 'model', 'assistant']),
       text: z.string()
     })
-  ).optional()
+  ).optional(),
+  currentModelData: z.any().optional(),
+  modelType: z.string().optional()
 });
 
 export async function askTutor(req: Request, res: Response, next: NextFunction) {
   try {
-    const parseResult = GeminiRequestSchema.safeParse(req.body);
+    const parseResult = TutorRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
       return res.status(400).json({
         status: 'error',
@@ -25,18 +27,22 @@ export async function askTutor(req: Request, res: Response, next: NextFunction) 
       });
     }
 
-    const { problemContext, mathematicalSolution, userMessage, chatHistory } = parseResult.data;
+    const { problemContext, mathematicalSolution, userMessage, chatHistory, currentModelData, modelType } = parseResult.data;
 
-    const reply = await GeminiService.generateSocraticResponse(
+    const result = await GroqService.generateSocraticResponse(
       problemContext,
       mathematicalSolution || {},
       userMessage,
-      chatHistory || []
+      chatHistory || [],
+      currentModelData,
+      modelType
     );
 
     res.status(200).json({
       status: 'success',
-      reply
+      reply: result.reply,
+      action: result.action || null,
+      newModelData: result.newModelData || null
     });
   } catch (error) {
     next(error);

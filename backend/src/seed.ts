@@ -73,8 +73,8 @@ async function main() {
 
   // 5. Create Transportation model & solve it
   const transportData = {
-    origins: ['Seattle_S1', 'Dallas_S2', 'Atlanta_S3'],
-    destinations: ['Denver_D1', 'Chicago_D2', 'Miami_D3', 'New_York_D4'],
+    origins: ['Quito_Norte', 'Guayaquil_Sur', 'Cuenca_Central'],
+    destinations: ['Manta_D1', 'Loja_D2', 'Machala_D3', 'Ambato_D4'],
     supply: [180.0, 240.0, 160.0],
     demand: [140.0, 160.0, 120.0, 160.0],
     costs: [
@@ -108,26 +108,37 @@ async function main() {
     console.error('⚠️ Failed to solve/seed Transport:', err.message);
   }
 
-  // 6. Create Networks model & solve it (Min Cost Flow)
+  // 6. Create Networks model & solve it (Shortest Path)
+  const bidirectionalConnections = [
+    ['Quito', 'Santo Domingo', 150, 500],
+    ['Quito', 'Ibarra', 115, 300],
+    ['Quito', 'Latacunga', 100, 400],
+    ['Latacunga', 'Ambato', 40, 400],
+    ['Ambato', 'Riobamba', 50, 400],
+    ['Riobamba', 'Cuenca', 250, 200],
+    ['Cuenca', 'Loja', 200, 150],
+    ['Cuenca', 'Machala', 170, 200],
+    ['Guayaquil', 'Machala', 190, 300],
+    ['Guayaquil', 'Manta', 200, 300],
+    ['Guayaquil', 'Santo Domingo', 300, 400],
+    ['Guayaquil', 'Riobamba', 210, 250],
+    ['Guayaquil', 'Cuenca', 200, 250],
+    ['Manta', 'Santo Domingo', 260, 250],
+    ['Esmeraldas', 'Santo Domingo', 160, 200],
+    ['Puyo', 'Ambato', 100, 150]
+  ];
+
+  const bidirectionalEdges = bidirectionalConnections.flatMap(([a, b, dist, cap]) => [
+    { source: a, target: b, weight: dist, capacity: cap },
+    { source: b, target: a, weight: dist, capacity: cap }
+  ]);
+
   const networksData = {
-    algorithm: 'min_cost_flow',
-    nodes: ['Node_1', 'Node_2', 'Node_3', 'Node_4', 'Node_5', 'Node_6'],
-    edges: [
-      { source: 'Node_1', target: 'Node_3', capacity: 200, weight: 10 },
-      { source: 'Node_2', target: 'Node_3', capacity: 150, weight: 12 },
-      { source: 'Node_3', target: 'Node_4', capacity: 180, weight: 8 },
-      { source: 'Node_3', target: 'Node_5', capacity: 200, weight: 15 },
-      { source: 'Node_4', target: 'Node_5', capacity: 170, weight: 7 },
-      { source: 'Node_4', target: 'Node_6', capacity: 180, weight: 11 },
-    ],
-    source_node: null,
-    target_node: null,
-    demands: {
-      Node_1: -200,
-      Node_2: -150,
-      Node_5: 170,
-      Node_6: 180,
-    },
+    algorithm: 'shortest_path',
+    nodes: ['Quito', 'Santo Domingo', 'Ibarra', 'Latacunga', 'Ambato', 'Riobamba', 'Cuenca', 'Loja', 'Machala', 'Guayaquil', 'Manta', 'Esmeraldas', 'Puyo'],
+    edges: bidirectionalEdges,
+    source_node: 'Guayaquil',
+    target_node: 'Quito',
   };
 
   const networksModel = await prisma.optimizationModel.create({
@@ -143,8 +154,8 @@ async function main() {
     await prisma.solution.create({
       data: {
         status: networksSol.status,
-        objectiveValue: networksSol.result.total_cost,
-        variables: networksSol.result.flows,
+        objectiveValue: networksSol.result.cost ?? networksSol.result.total_cost ?? 0,
+        variables: networksSol.result.path ?? networksSol.result.flows ?? {},
         constraints: {},
         modelId: networksModel.id,
       },

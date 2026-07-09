@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -11,8 +13,14 @@ import {
   ChevronRight, Download, RefreshCw, Filter, MapPin, Activity,
   ArrowUpRight, ArrowDownRight, Brain, Zap, Menu, Globe,
   AlertTriangle, CheckCircle2, Clock, Info, ChevronDown,
-  ChevronsLeft, ChevronsRight, Terminal,
+  ChevronsLeft, ChevronsRight, Terminal, Paperclip, Check,
+  Minus
 } from "lucide-react";
+import { TransportEditor } from "../components/TransportEditor";
+import { LPEditor } from "../components/LPEditor";
+import { NetworksEditor } from "../components/NetworksEditor";
+import { DynamicEditor } from "../components/DynamicEditor";
+import { InventoriesEditor } from "../components/InventoriesEditor";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -78,18 +86,18 @@ const lpSensChart = [
 ];
 
 const costMatrix = [
-  { origin: "Seattle (S1)",  denver: 12, chicago: 18, miami: 28, newYork: 22, supply: 180 },
-  { origin: "Dallas (S2)",   denver:  9, chicago: 14, miami: 16, newYork: 24, supply: 240 },
-  { origin: "Atlanta (S3)",  denver: 20, chicago: 11, miami:  8, newYork: 13, supply: 160 },
-  { origin: "Demanda",       denver: 140, chicago: 160, miami: 120, newYork: 160, supply: null },
+  { origin: "Quito Norte",  manta: 12, loja: 18, machala: 28, ambato: 22, supply: 180 },
+  { origin: "Guayaquil Sur", manta:  9, loja: 14, machala: 16, ambato: 24, supply: 240 },
+  { origin: "Cuenca C.",     manta: 20, loja: 11, machala:  8, ambato: 13, supply: 160 },
+  { origin: "Demanda",       manta: 140, loja: 160, machala: 120, ambato: 160, supply: null },
 ];
 const transportPlan = [
-  { route: "Seattle → Denver",   units: 140, cost: 1680, pct: 78, status: "Óptimo" },
-  { route: "Seattle → Chicago",  units:  40, cost:  720, pct: 22, status: "Óptimo" },
-  { route: "Dallas → Chicago",   units: 120, cost: 1680, pct: 50, status: "Óptimo" },
-  { route: "Dallas → New York",  units: 120, cost: 2880, pct: 50, status: "Óptimo" },
-  { route: "Atlanta → Miami",    units: 120, cost:  960, pct: 75, status: "Óptimo" },
-  { route: "Atlanta → New York", units:  40, cost:  520, pct: 25, status: "Subóptimo" },
+  { route: "Quito → Manta",   units: 140, cost: 1680, pct: 78, status: "Óptimo" },
+  { route: "Quito → Loja",  units:  40, cost:  720, pct: 22, status: "Óptimo" },
+  { route: "Guayaquil → Loja",   units: 120, cost: 1680, pct: 50, status: "Óptimo" },
+  { route: "Guayaquil → Ambato",  units: 120, cost: 2880, pct: 50, status: "Óptimo" },
+  { route: "Cuenca → Machala",    units: 120, cost:  960, pct: 75, status: "Óptimo" },
+  { route: "Cuenca → Ambato", units:  40, cost:  520, pct: 25, status: "Subóptimo" },
 ];
 
 const networkNodes = [
@@ -234,9 +242,10 @@ function Badge({ label, variant = "default" }: { label: string; variant?: "defau
 }
 
 function IconBtn({ icon: Icon, onClick, title }: { icon: React.ElementType; onClick?: () => void; title?: string }) {
+  const isDisabled = !onClick;
   return (
-    <button onClick={onClick} title={title}
-      className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+    <button onClick={onClick} title={isDisabled ? "Próximamente" : title} disabled={isDisabled}
+      className={`p-1.5 rounded transition-colors ${isDisabled ? "text-muted-foreground opacity-40 cursor-not-allowed" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}>
       <Icon size={14} />
     </button>
   );
@@ -279,14 +288,22 @@ const ROUTES = [
 
 const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }> = {
   // Transport hubs
-  "Seattle": { name: "Quito", coords: [-0.1807, -78.4678] },
-  "Denver": { name: "Manta", coords: [-0.9621, -80.7127] },
-  "Chicago": { name: "Guayaquil", coords: [-2.1894, -79.8890] },
-  "Miami": { name: "Cuenca", coords: [-2.9001, -79.0059] },
-  "New York": { name: "Ambato", coords: [-1.2491, -78.6273] },
-  "New_York": { name: "Ambato", coords: [-1.2491, -78.6273] },
-  "Dallas": { name: "Santo Domingo", coords: [-0.2530, -79.1754] },
-  "Atlanta": { name: "Ibarra", coords: [0.3517, -78.1222] },
+  "Quito": { name: "Quito", coords: [-0.1807, -78.4678] },
+  "Manta": { name: "Manta", coords: [-0.9621, -80.7127] },
+  "Guayaquil": { name: "Guayaquil", coords: [-2.1894, -79.8890] },
+  "Cuenca": { name: "Cuenca", coords: [-2.9001, -79.0059] },
+  "Ambato": { name: "Ambato", coords: [-1.2491, -78.6273] },
+  "Santo Domingo": { name: "Santo Domingo", coords: [-0.2530, -79.1754] },
+  "Ibarra": { name: "Ibarra", coords: [0.3517, -78.1222] },
+  "Loja": { name: "Loja", coords: [-3.9931, -79.2042] },
+  "Esmeraldas": { name: "Esmeraldas", coords: [0.9682, -79.6517] },
+  "Machala": { name: "Machala", coords: [-3.2581, -79.9553] },
+  "Portoviejo": { name: "Portoviejo", coords: [-1.0546, -80.4542] },
+  "Riobamba": { name: "Riobamba", coords: [-1.6709, -78.6475] },
+  "Tena": { name: "Tena", coords: [-0.9938, -77.8129] },
+  "Latacunga": { name: "Latacunga", coords: [-0.9333, -78.6167] },
+  "Puyo": { name: "Puyo", coords: [-1.4833, -78.0000] },
+  "Coca": { name: "Coca", coords: [-0.4665, -76.9871] },
 
   // Overview hubs
   "NY": { name: "Quito", coords: [-0.1807, -78.4678] },
@@ -321,12 +338,15 @@ const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }>
 
 function getCityInfo(key: string) {
   if (!key) return null;
-  // Normalize key by removing suffixes like _S1, _D1, etc.
   const clean = key.split('_')[0].trim();
-  let info = ECUADOR_CITIES[clean];
+  let info = ECUADOR_CITIES[clean] || ECUADOR_CITIES[key];
+  
   if (!info) {
-    info = ECUADOR_CITIES[key];
+    const searchName = clean.toLowerCase();
+    const found = Object.values(ECUADOR_CITIES).find(v => v.name.toLowerCase() === searchName);
+    if (found) info = found;
   }
+
   if (!info && key.toLowerCase().startsWith("node")) {
     const num = key.replace(/\D/g, "");
     info = ECUADOR_CITIES[`Node ${num}`] || ECUADOR_CITIES[`Node_${num}`];
@@ -595,121 +615,192 @@ function OverviewView({ dark }: { dark: boolean }) {
 
 function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const lpData = modelData?.data;
 
   const displaySolution = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
-    variable: v.name === 'x1' ? 'x₁ (Product A)' : v.name === 'x2' ? 'x₂ (Product B)' : v.name === 'x3' ? 'x₃ (Product C)' : v.name,
+    variable: v.name,
     value: v.value,
     reducedCost: v.reduced_cost ?? v.reducedCost ?? 0.0,
-    lower: v.lower ?? "—",
-    upper: v.upper ?? "—"
-  })) : lpSolution;
+  })) : [];
 
   const displayConstraints = activeSolution && Array.isArray(activeSolution.constraints) ? activeSolution.constraints.map((c: any) => ({
     name: c.name.replace(/_/g, ' '),
     slack: c.slack,
     shadowPrice: c.shadow_price ?? c.shadowPrice ?? 0.0,
-    rhsLow: c.rhsLow ?? "—",
-    rhsHigh: c.rhsHigh ?? "—"
-  })) : lpConstraints;
+  })) : [];
 
-  const objVal = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 24.68;
+  const objVal = activeSolution && activeSolution.objective_value !== undefined
+    ? activeSolution.objective_value
+    : (activeSolution?.objectiveValue || 0);
+
+  const isMaximize = lpData?.objective === 'maximize';
+
+  const constraintsData = lpData?.constraints ? lpData.constraints.map((c: any, index: number) => {
+    const expr = Object.entries(c.coefficients || {}).map(([k, v]) => `${v} × ${k}`).join(' + ') + ` ${c.operator} ${c.rhs}`;
+    const slack = activeSolution && displayConstraints[index] ? displayConstraints[index].slack : null;
+    const isBinding = slack === 0;
+    const util = slack !== null && c.rhs !== 0 ? Math.round(Math.abs(((c.rhs - slack) / c.rhs)) * 100) : null;
+    return { name: c.name, expr, util, binding: isBinding };
+  }) : [];
 
   return (
     <div className="flex flex-col gap-4">
+
+      {/* Formulación del Modelo */}
       <Card>
-        <SectionHeader title="Problem Formulation" sub="Maximize Z = 5x₁ + 4x₂ + 3x₃ (weekly profit in $000s)" />
-        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[
-            { name: "Labor Hours", expr: "6x₁ + 4x₂ + 2x₃ ≤ 240", util: activeSolution ? (displayConstraints[0]?.slack === 0 ? "100%" : "91.2%") : "100%", binding: activeSolution ? displayConstraints[0]?.slack === 0 : true },
-            { name: "Raw Material", expr: "3x₁ + 2x₂ + 5x₃ ≤ 270", util: activeSolution ? (displayConstraints[1]?.slack === 0 ? "100%" : "95.4%") : "95.4%", binding: activeSolution ? displayConstraints[1]?.slack === 0 : false },
-            { name: "Machine Hours", expr: "5x₁ + 6x₂ + 5x₃ ≤ 420", util: activeSolution ? (displayConstraints[2]?.slack === 0 ? "100%" : "92.5%") : "100%", binding: activeSolution ? displayConstraints[2]?.slack === 0 : true },
-          ].map(c => (
-            <div key={c.name} className={`rounded-lg border p-3 ${c.binding ? (dark ? "border-blue-500/30 bg-blue-500/5" : "border-blue-700/20 bg-blue-50") : "border-border bg-secondary/30"}`}>
-              <p className="text-[10px] font-mono text-muted-foreground">{c.name}</p>
-              <p className="text-sm font-mono font-medium text-foreground mt-1">{c.expr}</p>
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-[10px] text-muted-foreground">Utilization</span>
-                <span className={`text-[10px] font-mono font-semibold ${c.binding ? "text-amber-500" : "text-emerald-500"}`}>{c.util}</span>
-              </div>
+        <SectionHeader
+          title="Formulación del Modelo"
+          sub={lpData?.objective ? `Objetivo: ${isMaximize ? 'Maximizar' : 'Minimizar'} el valor total` : "Configura tu modelo para empezar"}
+        />
+        {lpData?.variables && lpData.variables.length > 0 && (
+          <div className="px-5 pb-4">
+            <div className="mb-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
+              <p className="text-[10px] font-semibold text-primary uppercase tracking-widest mb-1">Función Objetivo</p>
+              <p className="text-sm font-medium text-foreground">
+                {isMaximize ? '📈 Maximizar: ' : '📉 Minimizar: '}
+                {lpData.variables.map((v: any, i: number) => (
+                  <span key={v.name}>
+                    {i > 0 && ' + '}
+                    <span className="font-bold text-primary">{v.objCoef}</span>
+                    <span className="text-foreground"> × {v.name}</span>
+                  </span>
+                ))}
+              </p>
             </div>
-          ))}
-        </div>
+            {constraintsData.length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">Restricciones del Modelo</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {constraintsData.map((c: any) => (
+                    <div key={c.name} className={`rounded-lg border p-3 ${
+                      c.binding
+                        ? (dark ? 'border-amber-500/40 bg-amber-500/5' : 'border-amber-600/20 bg-amber-50')
+                        : 'border-border bg-secondary/30'
+                    }`}>
+                      <p className="text-[10px] font-semibold text-muted-foreground mb-1">{c.name.replace(/_/g, ' ')}</p>
+                      <p className="text-xs font-mono text-foreground">{c.expr}</p>
+                      {c.util !== null && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex-1 h-1 rounded-full bg-border">
+                            <div
+                              className={`h-full rounded-full ${c.binding ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                              style={{ width: `${Math.min(c.util, 100)}%` }}
+                            />
+                          </div>
+                          <span className={`text-[10px] font-bold ${c.binding ? 'text-amber-500' : 'text-emerald-500'}`}>{c.util}%</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </Card>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card>
-          <SectionHeader title="Optimal Solution" sub={`Simplex — Phase II complete · Z* = $${(objVal * 1000).toLocaleString()}`}
-            actions={<Badge label="OPTIMAL" variant="success" />}
-          />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Variable", "Value", "Reduced Cost", "Lower Bound", "Upper Bound"].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {displaySolution.map(r => (
-                  <tr key={r.variable} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-primary">{r.variable}</td>
-                    <td className="px-5 py-3 font-semibold text-foreground font-mono">{r.value.toFixed(2)}</td>
-                    <td className={`px-5 py-3 font-mono ${r.reducedCost < 0 ? "text-amber-500" : "text-muted-foreground"}`}>{r.reducedCost.toFixed(2)}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.lower}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.upper}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Resultados */}
+      {activeSolution && (
+        <>
+          {/* Banner objetivo */}
+          <div className={`rounded-xl border p-5 flex items-center justify-between ${
+            dark ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-emerald-600/20 bg-emerald-50'
+          }`}>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">🏆 Resultado Óptimo Encontrado</p>
+              <p className="text-2xl font-bold text-foreground">
+                {isMaximize ? 'Ganancia Máxima' : 'Costo Mínimo'}:
+                <span className="text-emerald-500 ml-2">${Number(objVal).toLocaleString('es-EC', { minimumFractionDigits: 2 })}</span>
+              </p>
+            </div>
+            <Badge label="ÓPTIMO" variant="success" />
           </div>
-        </Card>
 
-        <Card>
-          <SectionHeader title="Sensitivity Analysis" sub="Dual values & RHS ranging" />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Constraint", "Slack", "Shadow Price", "RHS Low", "RHS High"].map(h => (
-                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {displayConstraints.map(r => (
-                  <tr key={r.name} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 text-foreground">{r.name}</td>
-                    <td className={`px-5 py-3 font-mono ${r.slack === 0 ? "text-amber-500 font-semibold" : "text-emerald-600"}`}>{r.slack.toFixed(2)}</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-primary">${r.shadowPrice.toFixed(3)}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.rhsLow}</td>
-                    <td className="px-5 py-3 font-mono text-muted-foreground">{r.rhsHigh}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-mono text-muted-foreground mb-3 uppercase tracking-widest">RHS Ranging — Current vs. Feasible Range</p>
-            <ResponsiveContainer width="100%" height={120}>
-              <BarChart data={lpSensChart} layout="vertical" margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
-                <XAxis type="number" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="constraint" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 10, fontFamily: "DM Mono" }} width={60} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTooltip dark={dark} />} />
-                <Bar dataKey="lower" name="Lower" fill={dark ? "rgba(59,130,246,0.2)" : "rgba(19,69,168,0.1)"} radius={[2,0,0,2]} />
-                <Bar dataKey="current" name="Current" fill={dark ? "#3B82F6" : "#1345A8"} radius={0} />
-                <Bar dataKey="upper" name="Upper" fill={dark ? "rgba(14,165,233,0.3)" : "rgba(3,105,161,0.15)"} radius={[0,2,2,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
+          {/* Tarjetas de producción */}
+          <Card>
+            <SectionHeader title="Plan de Producción Óptimo" sub="Cantidad recomendada a producir de cada recurso" />
+            <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {displaySolution.map((r: any) => {
+                const isActive = Number(r.value) > 0;
+                return (
+                  <div key={r.variable} className={`rounded-xl border p-4 flex flex-col gap-2 ${
+                    isActive
+                      ? (dark ? 'border-primary/40 bg-primary/5' : 'border-blue-400/30 bg-blue-50')
+                      : 'border-border bg-secondary/20 opacity-60'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-foreground">{r.variable}</p>
+                      {isActive
+                        ? <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">✓ Producir</span>
+                        : <span className="text-[10px] font-bold text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">No producir</span>
+                      }
+                    </div>
+                    <p className="text-3xl font-bold text-primary">{Number(r.value).toFixed(0)}
+                      <span className="text-sm font-normal text-muted-foreground ml-1">unidades</span>
+                    </p>
+                    {Number(r.reducedCost) < 0 && (
+                      <p className="text-[10px] text-amber-500">⚠ Forzar producción reduciría la ganancia en ${Math.abs(Number(r.reducedCost)).toFixed(2)}/unidad</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* Gráfica del método gráfico */}
+          {activeSolution.graph_image && (
+            <Card>
+              <SectionHeader title="Visualización Gráfica" sub="Región factible y punto óptimo en el plano cartesiano" />
+              <div className="p-4 flex justify-center">
+                <img src={activeSolution.graph_image} alt="Método Gráfico" className="max-w-full rounded-lg border border-border shadow-md" />
+              </div>
+            </Card>
+          )}
+
+          {/* Estado de restricciones - amigable */}
+          <Card>
+            <SectionHeader title="Estado de los Recursos" sub="Cuánta capacidad disponible queda en cada limitación del modelo" />
+            <div className="px-5 pb-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {displayConstraints.map((r: any) => {
+                const isBinding = r.slack === 0;
+                const savingValue = Math.abs(Number(r.shadowPrice));
+                return (
+                  <div key={r.name} className={`rounded-xl border p-4 ${
+                    isBinding
+                      ? (dark ? 'border-amber-500/40 bg-amber-500/5' : 'border-amber-400/30 bg-amber-50')
+                      : 'border-border bg-secondary/20'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-semibold text-foreground">{r.name}</p>
+                      {isBinding
+                        ? <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">⚠ Recurso Agotado</span>
+                        : <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">✓ Hay Margen</span>
+                      }
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Capacidad libre: <span className="font-semibold text-foreground">{Number(r.slack).toFixed(1)} unidades sin usar</span>
+                    </p>
+                    {savingValue > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        💡 Ampliar este recurso en 1 unidad {isMaximize ? 'aumentaría la ganancia' : 'reduciría el costo'} en
+                        <span className="font-semibold text-primary ml-1">${savingValue.toFixed(3)}</span>
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
 
+
 function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const transportData = modelData?.data;
 
   const displayPlan = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
     route: `${v.origin.replace(/_/g, ' ')} → ${v.destination.replace(/_/g, ' ')}`,
@@ -727,10 +818,33 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
     units: v.units,
     active: v.units > 0
   })) : [
-    { from: "Seattle", to: "Denver", units: 240, active: true },
-    { from: "Chicago", to: "Chicago", units: 100, active: false },
-    { from: "New York", to: "New York", units: 100, active: false },
+    { from: "Quito", to: "Manta", units: 240, active: true },
+    { from: "Guayaquil", to: "Guayaquil", units: 100, active: false },
+    { from: "Cuenca", to: "Cuenca", units: 100, active: false },
   ];
+
+  const destinations = transportData?.destinations || ["Manta", "Loja", "Machala", "Ambato"];
+  const headers = [...destinations, "Oferta"];
+
+  const matrixRows = transportData ? transportData.origins.map((origin: string, i: number) => {
+    return {
+      origin: origin.replace(/_/g, ' '),
+      costs: transportData.costs[i],
+      supply: transportData.supply[i]
+    };
+  }) : costMatrix.slice(0, 3).map(row => ({
+    origin: row.origin,
+    costs: [row.manta, row.loja, row.machala, row.ambato],
+    supply: row.supply
+  }));
+
+  const demandRow = {
+    origin: "Demanda",
+    costs: transportData?.demand || [140, 160, 120, 160],
+    supply: null
+  };
+  
+  const allRows = [...matrixRows, demandRow];
 
   return (
     <div className="flex flex-col gap-4">
@@ -743,31 +857,34 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Card>
-          <SectionHeader title="Cost Matrix ($/unit)" sub="Transportation tableau — Northwest corner initialized" />
+          <SectionHeader title="Matriz de Costos ($/unidad)" sub="Costos de envío, demanda y oferta por cada ubicación" />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground">Origin \ Dest.</th>
-                  {["Denver", "Chicago", "Miami", "New York", "Supply"].map(h => (
-                    <th key={h} className="text-center px-3 py-2.5 text-[10px] font-mono text-muted-foreground">{h}</th>
+                  <th className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground">Origen \ Destino</th>
+                  {headers.map(h => (
+                    <th key={h} className="text-center px-3 py-2.5 text-[10px] font-mono text-muted-foreground">{typeof h === 'string' ? h.replace(/_/g, ' ') : h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {costMatrix.map((row, i) => (
-                  <tr key={i} className={`${i === 3 ? "border-t-2 border-border bg-secondary/20" : "hover:bg-secondary/30"} transition-colors`}>
-                    <td className="px-5 py-3 font-mono text-foreground text-[11px]">{row.origin}</td>
-                    {[row.denver, row.chicago, row.miami, row.newYork].map((v, j) => (
-                      <td key={j} className={`text-center px-3 py-3 font-mono font-semibold text-[11px] ${i === 3 ? "text-primary" : "text-foreground"}`}>
-                        {i < 3 ? `$${v}` : v}
+                {allRows.map((row, i) => {
+                  const isDemand = i === allRows.length - 1;
+                  return (
+                    <tr key={i} className={`${isDemand ? "border-t-2 border-border bg-secondary/20" : "hover:bg-secondary/30"} transition-colors`}>
+                      <td className="px-5 py-3 font-mono text-foreground text-[11px]">{row.origin}</td>
+                      {row.costs.map((v: number, j: number) => (
+                        <td key={j} className={`text-center px-3 py-3 font-mono font-semibold text-[11px] ${isDemand ? "text-primary" : "text-foreground"}`}>
+                          {isDemand ? v : `$${v}`}
+                        </td>
+                      ))}
+                      <td className={`text-center px-3 py-3 font-mono font-bold text-[11px] ${!isDemand ? "text-primary" : "text-muted-foreground"}`}>
+                        {row.supply !== null ? row.supply : "—"}
                       </td>
-                    ))}
-                    <td className={`text-center px-3 py-3 font-mono font-bold text-[11px] ${i < 3 ? "text-primary" : "text-muted-foreground"}`}>
-                      {row.supply !== null ? row.supply : "—"}
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -816,80 +933,152 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
 
 function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
+  const netData = modelData?.data;
 
-  const displayNodes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
-    Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
-      node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
-      type: "Active Arc",
-      flow_in: flow,
-      flow_out: flow,
-      excess: flow > 0 ? flow : 0
-    }))
-  ) : null;
+  let displayNodes: any[] = [];
+  let mapRoutes: any[] = [];
 
-  const totalCost = activeSolution && activeSolution.objectiveValue !== undefined ? activeSolution.objectiveValue : 6820;
+  if (activeSolution && activeSolution.variables) {
+    // Build mapRoutes from netData.edges so the entire network is always visible
+    mapRoutes = netData?.edges?.map((e: any) => ({
+      from: e.source.replace(/_/g, ' '),
+      to: e.target.replace(/_/g, ' '),
+      units: 0,
+      active: false
+    })) || [];
 
-  const mapRoutes = activeSolution && activeSolution.variables ? Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
-    Object.entries(targets).map(([tgt, flow]: [string, any]) => ({
-      from: src,
-      to: tgt,
-      units: flow,
-      active: flow > 0
-    }))
-  ) : [
-    { from: "Node_1", to: "Node_3", units: 150, active: true },
-    { from: "Node_1", to: "Node_4", units: 50, active: true },
-    { from: "Node_2", to: "Node_3", units: 100, active: true },
-    { from: "Node_2", to: "Node_4", units: 50, active: true },
-    { from: "Node_3", to: "Node_5", units: 200, active: true },
-    { from: "Node_4", to: "Node_5", units: 150, active: true },
-  ];
+    if (Array.isArray(activeSolution.variables)) {
+      // Shortest path format: ['Guayaquil', 'Santo Domingo', 'Quito']
+      const path = activeSolution.variables;
+      for (let i = 0; i < path.length - 1; i++) {
+        const src = path[i];
+        const tgt = path[i + 1];
+        const edge = netData?.edges?.find((e: any) => e.source === src && e.target === tgt);
+        const cost = edge ? edge.weight : 0;
+        displayNodes.push({
+          node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
+          type: "Active Arc",
+          flow_in: 1, flow_out: 1, excess: 1, cost: cost
+        });
+        
+        // Update mapRoutes to highlight the path
+        const mapSrc = src.replace(/_/g, ' ');
+        const mapTgt = tgt.replace(/_/g, ' ');
+        const route = mapRoutes.find(r => r.from === mapSrc && r.to === mapTgt);
+        if (route) {
+          route.active = true;
+          route.units = 1;
+        }
+      }
+    } else {
+      // Min cost flow / Max flow format
+      displayNodes = Object.entries(activeSolution.variables).flatMap(([src, targets]: [string, any]) =>
+        Object.entries(targets).map(([tgt, flow]: [string, any]) => {
+          const edge = netData?.edges?.find((e: any) => e.source === src && e.target === tgt);
+          const cost = edge ? edge.weight * flow : 0;
+          return {
+            node: `${src.replace(/_/g, ' ')} → ${tgt.replace(/_/g, ' ')}`,
+            type: flow > 0 ? "Active Arc" : "Inactive Arc",
+            flow_in: flow, flow_out: flow, excess: flow > 0 ? flow : 0, cost: cost
+          };
+        })
+      ).filter(r => r.flow_in > 0);
+
+      Object.entries(activeSolution.variables).forEach(([src, targets]: [string, any]) => {
+        Object.entries(targets).forEach(([tgt, flow]: [string, any]) => {
+          if (flow > 0) {
+            const route = mapRoutes.find(r => r.from === src.replace(/_/g, ' ') && r.to === tgt.replace(/_/g, ' '));
+            if (route) {
+              route.active = true;
+              route.units = flow;
+            }
+          }
+        });
+      });
+    }
+  }
+
+  const totalCost = activeSolution?.objectiveValue ?? 0;
+
+  // Generate Cumulative Cost Data for LineChart
+  const cumulativeData: any[] = [];
+  let cumSum = 0;
+  if (displayNodes) {
+    displayNodes.forEach((r, i) => {
+      cumSum += r.cost;
+      cumulativeData.push({
+        step: i + 1,
+        route: r.node,
+        cost: r.cost,
+        cumulative: cumSum
+      });
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <SectionHeader title="Mapa Real de Flujo de Redes" sub="Visualización interactiva de nodos y arcos con flujos óptimos calculados" />
+        <SectionHeader title="Mapa Real de Flujo de Redes" sub="Visualización interactiva de rutas y flujos óptimos en Ecuador" />
         <div className="p-4">
           <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
         </div>
       </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {/* Nodos Input Table - Only relevant for Min Cost Flow */}
+        {netData?.algorithm === 'min_cost_flow' && (
+          <Card>
+            <SectionHeader title="Nodos del Sistema" sub="Oferta y Demanda de cada ciudad" />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Ciudad / Nodo", "Tipo", "Oferta / Demanda (Unidades)"].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {netData?.nodes?.map((node: string, i: number) => {
+                    const demand = netData.demands?.[node] || 0;
+                    const type = demand < 0 ? "Planta (Oferta)" : demand > 0 ? "Cliente (Demanda)" : "Transbordo";
+                    return (
+                      <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-5 py-3 font-mono text-[11px] text-foreground">{node.replace(/_/g, ' ')}</td>
+                        <td className="px-5 py-3">
+                          <Badge label={type} variant={demand < 0 ? "info" : demand > 0 ? "warning" : "default"} />
+                        </td>
+                        <td className={`px-5 py-3 font-mono font-semibold ${demand < 0 ? "text-emerald-600" : demand > 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                          {Math.abs(demand)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
+        {/* Edges Input Table */}
         <Card>
-          <SectionHeader title="Node Flow Analysis" sub={`Min-cost flow · total flow: 350 units · total cost: $${totalCost.toLocaleString()}`} />
+          <SectionHeader title="Arcos (Rutas Posibles)" sub="Conexiones, capacidades y costos de envío" />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  {["Arc / Route", "Type", "Flow In", "Flow Out", "Flow Amount"].map(h => (
+                  {["Origen", "Destino", "Costo Unitario", "Capacidad Máx."].map(h => (
                     <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {displayNodes ? displayNodes.map((r, i) => (
+                {netData?.edges?.map((edge: any, i: number) => (
                   <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
-                    <td className="px-5 py-3">
-                      <Badge label={r.type} variant="info" />
-                    </td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_in}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_out}</td>
-                    <td className="px-5 py-3 font-mono font-semibold text-emerald-600">
-                      {r.excess}
-                    </td>
-                  </tr>
-                )) : networkNodes.map(r => (
-                  <tr key={r.node} className="hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
-                    <td className="px-5 py-3">
-                      <Badge label={r.type} variant={r.type === "Source" ? "info" : r.type === "Sink" ? "warning" : "default"} />
-                    </td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_in}</td>
-                    <td className="px-5 py-3 font-mono text-foreground">{r.flow_out}</td>
-                    <td className={`px-5 py-3 font-mono font-semibold ${r.excess > 0 ? "text-emerald-600" : r.excess < 0 ? "text-red-500" : "text-muted-foreground"}`}>
-                      {r.excess > 0 ? `+${r.excess}` : r.excess}
-                    </td>
+                    <td className="px-5 py-3 font-mono text-foreground">{edge.source.replace(/_/g, ' ')}</td>
+                    <td className="px-5 py-3 font-mono text-foreground">{edge.target.replace(/_/g, ' ')}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-primary">${edge.weight}</td>
+                    <td className="px-5 py-3 font-mono text-muted-foreground">{edge.capacity} u.</td>
                   </tr>
                 ))}
               </tbody>
@@ -897,18 +1086,43 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
           </div>
         </Card>
 
+        {/* Flow Analysis Table */}
         <Card>
-          <SectionHeader title="Flow Over Time" sub="Network utilization — 6 periods" />
+          <SectionHeader title="Análisis de Flujo Óptimo" sub={`Costo total mínimo: $${totalCost.toLocaleString()}`} />
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Ruta Activa", "Flujo Enviado", "Costo Total de Ruta"].map(h => (
+                    <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {displayNodes ? displayNodes.map((r: any, i: number) => (
+                  <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                    <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.node}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-emerald-600">{r.excess} u.</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-primary">${(r.cost ?? 0).toLocaleString()}</td>
+                  </tr>
+                )) : null}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* Line Chart */}
+        <Card>
+          <SectionHeader title="Costos Acumulados por Ruta" sub="Progresión del costo al sumar las rutas óptimas" />
           <div className="p-4">
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={networkFlow} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+              <LineChart data={cumulativeData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
-                <XAxis dataKey="t" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
+                <XAxis dataKey="step" tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: dark ? "#6B7280" : "#9CA3AF", fontSize: 11, fontFamily: "DM Mono" }} axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTooltip dark={dark} />} />
-                <ReferenceLine y={200} stroke={dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)"} strokeDasharray="4 4" label={{ value: "Capacity", position: "right", fontSize: 10, fill: dark ? "#6B7280" : "#9CA3AF", fontFamily: "DM Mono" }} />
-                <Line type="monotone" dataKey="flowA" name="Arc A→B" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} dot={{ r: 3, fill: dark ? "#3B82F6" : "#1345A8" }} />
-                <Line type="monotone" dataKey="flowB" name="Arc C→D" stroke={dark ? "#0EA5E9" : "#0369A1"} strokeWidth={2} dot={{ r: 3, fill: dark ? "#0EA5E9" : "#0369A1" }} strokeDasharray="4 2" />
+                <Line type="monotone" dataKey="cumulative" name="Costo Acumulado" stroke={dark ? "#10B981" : "#059669"} strokeWidth={3} dot={{ r: 4, fill: dark ? "#10B981" : "#059669" }} />
+                <Line type="monotone" dataKey="cost" name="Costo Ruta" stroke={dark ? "#3B82F6" : "#1345A8"} strokeWidth={2} strokeDasharray="4 2" dot={{ r: 3, fill: dark ? "#3B82F6" : "#1345A8" }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -1073,22 +1287,53 @@ function InventoriesView({ dark, modelData }: { dark: boolean; modelData?: any }
 // ─── AI Tutor ─────────────────────────────────────────────────────────────────
 
 const MODULE_INTROS: Record<ModuleId, string> = {
-  overview:    "Bienvenido al Centro de Control de Tech-Logistics. Puedo ayudarte a interpretar KPIs, diagnosticar anomalías o realizar análisis de escenarios. ¿Qué te gustaría explorar?",
-  lp:          "Veo que estás revisando el optimizador lineal. La solución óptima actual Z* = $24.68k tiene dos restricciones activas. ¿Te gustaría analizar la interpretación del dual o realizar un análisis de sensibilidad?",
-  transport:   "El modelo de transporte muestra 6 rutas activas con un costo total de $8,440. El carril Seattle→Denver está completamente asignado. ¿Debería verificar asignaciones alternas?",
-  networks:    "El análisis de redes confirma un flujo de costo mínimo para 350 unidades. Los Nodos 3 y 4 son puntos de transbordo. ¿Quieres correr sensibilidad de capacidades de arcos?",
-  ip:          "El resolvedor PE/MIP convergió con un gap de optimidad del 1.71%. La relajación lineal dio $4,820.40 vs el óptimo entero de $4,740. ¿Quieres analizar el árbol de ramificación?",
-  dp:          "La programación dinámica resolvió el problema de inventario de 6 períodos con un costo total de $6,200. Las ecuaciones de Bellman indican ordenar en períodos 1, 3 y 5. ¿Quieres ver el detalle?",
-  inventories: "Auditoría de inventario: 3 SKUs requieren acción — TL-A0041 y TL-D0512 están por debajo del punto de reorden. ¿Calculamos los parámetros de EOQ revisados?",
+  overview:    "Bienvenido al Centro de Control. Como tu Consultor Ejecutivo, estoy listo para interpretar los indicadores clave y diagnosticar oportunidades de mejora en tu cadena de suministro.",
+  lp:          "Módulo de Optimización de Recursos. ¿Deseas que analice los resultados o que evaluemos los ahorros potenciales de tus recursos?",
+  transport:   "Módulo de Distribución y Transporte. Estoy listo para evaluar el costo total de distribución y recomendar ajustes en tus rutas.",
+  networks:    "Módulo de Redes Logísticas. ¿Quieres que analicemos los flujos de distribución o identifiquemos los cuellos de botella en la red?",
+  ip:          "Módulo de Decisiones Estratégicas. ¿Procedemos a evaluar las opciones de inversión o asignación?",
+  dp:          "Módulo de Planificación por Etapas. ¿Revisamos la política óptima y los costos acumulados por período?",
+  inventories: "Módulo de Inventarios. ¿Te gustaría analizar los niveles óptimos de pedido y los costos de almacenamiento?",
 };
 
-function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activeModule: ModuleId; activeModelData?: any }) {
+function AiTutor({ dark, activeModule, activeModelData, onUpdateModelData }: { dark: boolean; activeModule: ModuleId; activeModelData?: any; onUpdateModelData?: (newJson: string) => void }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevModule = useRef<ModuleId | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [pdfName, setPdfName] = useState<string | null>(null);
+
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setUploadingPdf(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    try {
+      const response = await fetch("http://localhost:4000/api/tutor/upload", {
+        method: "POST",
+        body: formData
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setPdfName(file.name);
+        setMessages(m => [...m, { role: "assistant", text: `📚 ¡Excelente! He leído tu documento "${file.name}" y lo he guardado en mi memoria vectorial. Ya puedes hacerme preguntas sobre él.` }]);
+      } else {
+        setMessages(m => [...m, { role: "assistant", text: `Error al leer el PDF: ${data.error}` }]);
+      }
+    } catch (err) {
+      setMessages(m => [...m, { role: "assistant", text: "Error de conexión al subir el PDF." }]);
+    } finally {
+      setUploadingPdf(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   useEffect(() => {
     if (prevModule.current !== activeModule) {
@@ -1117,13 +1362,15 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          modelType: activeModelData?.type || activeModule,
           problemContext,
           mathematicalSolution: solution,
           userMessage: text,
           chatHistory: messages.map(m => ({
             role: m.role === "assistant" ? "model" : "user",
             text: m.text
-          }))
+          })),
+          currentModelData: activeModelData?.data || null
         })
       });
 
@@ -1132,12 +1379,17 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
 
       if (resData.status === "success" && resData.reply) {
         setMessages(m => [...m, { role: "assistant", text: resData.reply }]);
+
+        // Handle data update action from Tool Calling
+        if (resData.action === "UPDATE_MODEL" && resData.newModelData && onUpdateModelData) {
+          onUpdateModelData(JSON.stringify(resData.newModelData, null, 2));
+        }
       } else {
-        setMessages(m => [...m, { role: "assistant", text: "I'm having trouble analyzing the model right now. Could you please check the server connection?" }]);
+        setMessages(m => [...m, { role: "assistant", text: "Hubo un problema al procesar tu solicitud. Verifica la conexión del servidor." }]);
       }
     } catch (error) {
       setTyping(false);
-      setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Tutor Socrático. Asegúrate de que el backend está corriendo." }]);
+      setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Asistente IA. Asegúrate de que el backend está corriendo." }]);
     }
   };
 
@@ -1147,52 +1399,60 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
 
   return (
     <>
-      {/* Toggle button */}
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-transform hover:scale-105"
-        style={{ background: accent, boxShadow: `0 4px 20px ${accent}50` }}
-      >
-        {open ? <X size={18} className="text-white" /> : <Brain size={18} className="text-white" />}
-      </button>
+      {/* Toggle button — only visible when chat is closed */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-transform hover:scale-105"
+          style={{ background: accent, boxShadow: `0 4px 20px ${accent}50` }}
+        >
+          <Brain size={18} className="text-white" />
+        </button>
+      )}
 
       {/* Panel */}
       {open && (
         <div
-          className="fixed bottom-24 right-6 z-50 w-[340px] rounded-xl overflow-hidden flex flex-col"
+          className="fixed bottom-6 right-6 z-50 w-[440px] rounded-xl overflow-hidden flex flex-col"
           style={{
             background: bg,
             border: `1px solid ${border}`,
             boxShadow: dark ? "0 20px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)" : "0 20px 60px rgba(0,0,0,0.15)",
-            height: 480,
+            height: 620,
           }}
         >
           {/* Header */}
           <div className="px-4 py-3 flex items-center gap-2.5 border-b" style={{ borderColor: border }}>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: accent }}>
-              <Brain size={14} className="text-white" />
+            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: accent }}>
+              <Brain size={12} className="text-white" />
             </div>
-            <div>
-              <p className="text-sm font-semibold" style={{ color: dark ? "#E2E8F0" : "#0D1B2A" }}>AI Tutor</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: dark ? "#E2E8F0" : "#0D1B2A" }}>Asistente IA</p>
               <p className="text-[10px] font-mono" style={{ color: dark ? "#3B82F6" : "#1345A8" }}>
-                {MODULES.find(m => m.id === activeModule)?.shortLabel} · ACTIVE
+                {MODULES.find(m => m.id === activeModule)?.shortLabel} · Llama 3.3
               </p>
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-mono" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>GPT-4o</span>
+              <button
+                onClick={() => setOpen(false)}
+                className="ml-2 p-1 rounded hover:bg-white/10 transition-colors"
+                title="Minimizar"
+              >
+                <Minus size={14} style={{ color: dark ? "#6B7280" : "#9CA3AF" }} />
+              </button>
             </div>
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ scrollbarWidth: "none" }}>
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ scrollbarWidth: "thin" }}>
             {messages.map((m, i) => (
               <div key={i} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
                 {m.role === "assistant" && (
-                  <span className="text-[9px] font-mono mb-1" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>AI TUTOR</span>
+                  <span className="text-[9px] font-mono mb-1" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>ASISTENTE IA</span>
                 )}
                 <div
-                  className="max-w-[92%] text-xs leading-relaxed px-3 py-2 rounded-lg"
+                  className="max-w-[95%] text-xs leading-relaxed px-3 py-2.5 rounded-lg"
                   style={{
                     background: m.role === "user"
                       ? (dark ? "rgba(59,130,246,0.12)" : "rgba(19,69,168,0.07)")
@@ -1204,7 +1464,24 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
                     borderRadius: m.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
                   }}
                 >
-                  {m.text}
+                  {m.role === "assistant" ? (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        table: ({children, ...props}) => <table className="w-full text-[11px] my-2 border-collapse" {...props}>{children}</table>,
+                        thead: ({children, ...props}) => <thead className="border-b border-white/10" {...props}>{children}</thead>,
+                        th: ({children, ...props}) => <th className="text-left px-2 py-1 font-semibold text-[10px] uppercase tracking-wide opacity-70" {...props}>{children}</th>,
+                        td: ({children, ...props}) => <td className="px-2 py-1 border-t border-white/5" {...props}>{children}</td>,
+                        strong: ({children, ...props}) => <strong className="font-bold" style={{ color: dark ? "#60A5FA" : "#1345A8" }} {...props}>{children}</strong>,
+                        ul: ({children, ...props}) => <ul className="list-disc pl-4 my-1 space-y-0.5" {...props}>{children}</ul>,
+                        ol: ({children, ...props}) => <ol className="list-decimal pl-4 my-1 space-y-0.5" {...props}>{children}</ol>,
+                        h3: ({children, ...props}) => <h3 className="text-sm font-bold mt-2 mb-1" {...props}>{children}</h3>,
+                        p: ({children, ...props}) => <p className="mb-1.5 last:mb-0" {...props}>{children}</p>,
+                      }}
+                    >{m.text}</ReactMarkdown>
+                  ) : (
+                    m.text
+                  )}
                 </div>
               </div>
             ))}
@@ -1219,18 +1496,32 @@ function AiTutor({ dark, activeModule, activeModelData }: { dark: boolean; activ
           </div>
 
           {/* Input */}
-          <div className="px-4 py-3 border-t" style={{ borderColor: border }}>
+          <div className="px-4 py-3 border-t flex flex-col gap-2" style={{ borderColor: border }}>
+            {pdfName && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 w-fit">
+                <Check size={10} />
+                <span className="text-[9px] font-mono font-bold truncate max-w-[150px]">{pdfName}</span>
+              </div>
+            )}
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: dark ? "rgba(255,255,255,0.05)" : "#F4F7F6", border: `1px solid ${border}` }}>
-              <Terminal size={12} style={{ color: dark ? "#6B7280" : "#9CA3AF" }} className="shrink-0" />
+              <input type="file" ref={fileInputRef} accept="application/pdf" className="hidden" onChange={handlePdfUpload} />
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                disabled={uploadingPdf}
+                className="shrink-0 transition-opacity hover:opacity-70 disabled:opacity-30"
+              >
+                <Paperclip size={14} style={{ color: dark ? "#6B7280" : "#9CA3AF" }} />
+              </button>
               <input
                 className="flex-1 bg-transparent text-xs outline-none"
                 style={{ color: dark ? "#E2E8F0" : "#0D1B2A", fontFamily: "DM Mono, monospace" }}
-                placeholder="Ask about this module..."
+                placeholder={uploadingPdf ? "Leyendo PDF..." : "Pregunta algo..."}
                 value={input}
+                disabled={uploadingPdf}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && send()}
               />
-              <button onClick={send} className="shrink-0 transition-opacity hover:opacity-70">
+              <button onClick={send} disabled={uploadingPdf} className="shrink-0 transition-opacity hover:opacity-70 disabled:opacity-30">
                 <Send size={12} style={{ color: accent }} />
               </button>
             </div>
@@ -1425,11 +1716,11 @@ export default function App() {
     }
   };
 
-  const handleSaveAndSolve = async () => {
-    if (jsonError || !activeModelData) return;
+  const handleSaveAndSolve = async (dataToSave?: any) => {
+    if ((jsonError && !dataToSave) || !activeModelData) return;
     setSolving(true);
     try {
-      const parsedData = JSON.parse(jsonText);
+      const parsedData = dataToSave || JSON.parse(jsonText);
       const response = await fetch(`http://localhost:4000/api/models/${activeModelData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1439,7 +1730,10 @@ export default function App() {
       if (result.status === "success" && result.data) {
         setDbModels(prev => prev.map(m => m.id === activeModelData.id ? result.data : m));
         setEditing(false);
-        alert("¡Parámetros guardados y modelo resuelto con éxito!");
+        // Ocultar la alerta molesta para una mejor UX cuando la IA actualiza
+        if (!dataToSave) {
+          alert("¡Parámetros guardados y modelo resuelto con éxito!");
+        }
       } else {
         alert(`Error al guardar y resolver: ${result.message}`);
       }
@@ -1545,8 +1839,9 @@ export default function App() {
             <div className="flex-1" />
 
             {/* Search */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
-              style={{ background: dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${borderColor}`, color: textMuted }}>
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs opacity-40 cursor-not-allowed"
+              style={{ background: dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", border: `1px solid ${borderColor}`, color: textMuted }}
+              title="Próximamente">
               <Search size={12} />
               <span className="font-mono">Buscar módulos...</span>
               <span className="font-mono ml-8 text-[10px] opacity-50">⌘K</span>
@@ -1562,12 +1857,12 @@ export default function App() {
               <span>{dark ? "Claro" : "Oscuro"}</span>
             </button>
 
-            <button className="relative p-1.5 rounded transition-colors" style={{ color: textMuted }}>
+            <button className="relative p-1.5 rounded transition-colors opacity-40 cursor-not-allowed" style={{ color: textMuted }} title="Próximamente">
               <Bell size={16} />
               <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
             </button>
 
-            <button className="p-1.5 rounded transition-colors" style={{ color: textMuted }}>
+            <button className="p-1.5 rounded transition-colors opacity-40 cursor-not-allowed" style={{ color: textMuted }} title="Próximamente">
               <Settings size={16} />
             </button>
 
@@ -1628,7 +1923,7 @@ export default function App() {
                   actions={
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={handleSaveAndSolve}
+                        onClick={() => handleSaveAndSolve()}
                         disabled={solving || !!jsonError}
                         className="text-xs px-3 py-1.5 bg-emerald-600 text-white rounded font-semibold disabled:opacity-50"
                       >
@@ -1638,15 +1933,29 @@ export default function App() {
                   }
                 />
                 <div className="p-4 flex flex-col gap-2">
-                  <textarea
-                    value={jsonText}
-                    onChange={(e) => handleJsonChange(e.target.value)}
-                    rows={10}
-                    className="w-full font-mono text-xs p-3 rounded border bg-black text-emerald-400 focus:outline-none"
-                    style={{ borderColor: jsonError ? "#EF4444" : borderColor }}
-                  />
-                  {jsonError && (
-                    <p className="text-xs text-red-500 font-mono">Error de sintaxis JSON: {jsonError}</p>
+                  {activeModule === "transport" ? (
+                    <TransportEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : (activeModule === "lp" || activeModule === "ip") ? (
+                    <LPEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : activeModule === "networks" ? (
+                    <NetworksEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : activeModule === "dp" ? (
+                    <DynamicEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : activeModule === "inventories" ? (
+                    <InventoriesEditor jsonText={jsonText} onChange={handleJsonChange} dark={dark} />
+                  ) : (
+                    <>
+                      <textarea
+                        value={jsonText}
+                        onChange={(e) => handleJsonChange(e.target.value)}
+                        rows={10}
+                        className="w-full font-mono text-xs p-3 rounded border bg-black text-emerald-400 focus:outline-none"
+                        style={{ borderColor: jsonError ? "#EF4444" : borderColor }}
+                      />
+                      {jsonError && (
+                        <p className="text-xs text-red-500 font-mono">Error de sintaxis JSON: {jsonError}</p>
+                      )}
+                    </>
                   )}
                 </div>
               </Card>
@@ -1658,7 +1967,7 @@ export default function App() {
       </div>
 
       {/* AI Tutor */}
-      <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} />
+      <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} onUpdateModelData={(newJson) => { handleJsonChange(newJson); setEditing(true); handleSaveAndSolve(JSON.parse(newJson)); }} />
 
       <style>{`
         * { scrollbar-width: none; }

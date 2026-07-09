@@ -4,6 +4,11 @@ from typing import List, Dict, Optional, Any
 import pulp
 import numpy as np
 import copy
+import io
+import base64
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 router = APIRouter()
 
@@ -24,6 +29,7 @@ class LPProblemInput(BaseModel):
     objective: str  # "maximize" or "minimize"
     variables: List[VariableInput]
     constraints: List[ConstraintInput]
+    algorithm: Optional[str] = "auto"
 
 class VariableOutput(BaseModel):
     name: str
@@ -42,6 +48,8 @@ class LPSolutionOutput(BaseModel):
     objective_value: Optional[float] = None
     variables: List[VariableOutput]
     constraints: List[ConstraintOutput]
+    graph_image: Optional[str] = None
+    algorithm: Optional[str] = None
 
 def solve_lp_helper(
     objective_str: str,
@@ -197,11 +205,84 @@ def solve_lp(payload: LPProblemInput):
                 rhsHigh=rhs_high if (rhs_high is not None and not np.isinf(rhs_high)) else None
             ))
             
+        graph_base64 = None
+        if payload.algorithm == "graphical" and len(payload.variables) == 2:
+            try:
+                v1, v2 = payload.variables[0], payload.variables[1]
+                fig, ax = plt.subplots(figsize=(8, 6))
+                
+                max_x = max([v1.upBound or 0, 10])
+                for c in payload.constraints:
+                    c1 = c.coefficients.get(v1.name, 0)
+                    if c1 > 0:
+                        max_x = max(max_x, c.rhs / c1)
+                        
+                x = np.linspace(0, max_x * 1.5, 400)
+                y_lower = np.zeros_like(x)
+                y_upper = np.full_like(x, np.inf)
+                if v2.upBound is not None:
+                    y_upper = np.minimum(y_upper, v2.upBound)
+                    
+                for c in payload.constraints:
+                    c1 = c.coefficients.get(v1.name, 0)
+                    c2 = c.coefficients.get(v2.name, 0)
+                    rhs = c.rhs
+                    if c2 == 0:
+                        if c1 > 0:
+                            ax.axvline(x=rhs/c1, color='gray', linestyle='--')
+                        continue
+                        
+                    y_line = (rhs - c1*x) / c2
+                    ax.plot(x, y_line, label=f'{c.name}')
+                    
+                    if c.operator == '<=':
+                        if c2 > 0:
+                            y_upper = np.minimum(y_upper, y_line)
+                        else:
+                            y_lower = np.maximum(y_lower, y_line)
+                    elif c.operator == '>=':
+                        if c2 > 0:
+                            y_lower = np.maximum(y_lower, y_line)
+                        else:
+                            y_upper = np.minimum(y_upper, y_line)
+                            
+                y_upper_plot = np.maximum(y_upper, y_lower)
+                y_upper_plot[np.isinf(y_upper_plot)] = max_x * 1.5
+                ax.fill_between(x, y_lower, y_upper_plot, where=(y_upper_plot >= y_lower), alpha=0.3, color='green', label='Región Factible')
+                
+                x_opt = pulp_vars[v1.name].varValue
+                y_opt = pulp_vars[v2.name].varValue
+                if x_opt is not None and y_opt is not None:
+                    ax.plot(x_opt, y_opt, 'ro', markersize=8, label=f'Óptimo: ({x_opt:.1f}, {y_opt:.1f})')
+                    c1_obj = v1.objCoef
+                    c2_obj = v2.objCoef
+                    if c2_obj != 0 and obj_val is not None:
+                        y_obj = (obj_val - c1_obj * x) / c2_obj
+                        ax.plot(x, y_obj, 'r--', label=f'Función Obj.')
+                        
+                ax.set_xlim(0, max_x * 1.2)
+                ax.set_ylim(0, max_x * 1.2)
+                ax.set_xlabel(v1.name)
+                ax.set_ylabel(v2.name)
+                ax.set_title("Método Gráfico")
+                ax.legend(loc='upper right', fontsize='small')
+                ax.grid(True, alpha=0.3)
+                
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+                buf.seek(0)
+                graph_base64 = "data:image/png;base64," + base64.b64encode(buf.read()).decode('utf-8')
+                plt.close(fig)
+            except Exception as plot_err:
+                print(f"Plotting error: {plot_err}")
+
         return LPSolutionOutput(
             status=status_str,
             objective_value=obj_val,
             variables=var_results,
-            constraints=constr_results
+            constraints=constr_results,
+            graph_image=graph_base64,
+            algorithm=payload.algorithm
         )
         
     except Exception as e:
