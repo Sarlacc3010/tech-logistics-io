@@ -11,6 +11,7 @@ Desarrollada como Trabajo Final de Semestre de la asignatura de Investigación O
 - [Arquitectura](#arquitectura)
 - [El Tutor de IA (multi-LLM)](#el-tutor-de-ia-multi-llm)
 - [Módulos y algoritmos](#módulos-y-algoritmos)
+- [Mapa real y rutas (Mapbox)](#mapa-real-y-rutas-mapbox)
 - [Cómo se usa](#cómo-se-usa)
 - [Problemas de ejemplo](#problemas-de-ejemplo)
 - [API del backend](#api-del-backend)
@@ -35,12 +36,15 @@ El sistema está compuesto por **tres servicios** orquestados con Docker Compose
 │        React + Vite + Tailwind  (puerto 5173)            │
 │   · Rutas por módulo (/lp, /transport, /networks, …)     │
 │   · Chat del Tutor IA  · Vistas paso a paso              │
+│   · Mapa real con Mapbox GL (rutas viales, geocoding)    │
+│   · Editores con formulario real por módulo              │
 └────────────────────────┬─────────────────────────────────┘
                          │ HTTP
 ┌────────────────────────▼─────────────────────────────────┐
 │                        Backend                           │
 │           Node.js + Express + TS (puerto 4000)           │
-│   · Orquestación multi-LLM (Groq)  · RAG con PDFs        │
+│   · Orquestación multi-LLM (Groq + Gemini, con fallback  │
+│     mutuo ante rate-limit)  · RAG con PDFs                │
 │   · Validación Zod  · Persistencia (Prisma/PostgreSQL)   │
 │   · Auditoría de interacciones (archivo + MongoDB)       │
 │   · Anexo de Interacción con IA (JSON / CSV / PDF)       │
@@ -53,6 +57,8 @@ El sistema está compuesto por **tres servicios** orquestados con Docker Compose
 │   · Simplex / Dos Fases / Gran M   · MODI + heurísticas  │
 │   · Dijkstra / Kruskal / Edmonds-Karp                    │
 │   · DP (mochila, Wagner-Whitin)    · EOQ y variantes     │
+│   · Análisis de sensibilidad (precios sombra, costo de   │
+│     oportunidad) en PL y Transporte                      │
 │   Todos devuelven steps[] (iteraciones del algoritmo)    │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -63,14 +69,16 @@ El sistema está compuesto por **tres servicios** orquestados con Docker Compose
 
 ## El Tutor de IA (multi-LLM)
 
-El flujo completo cuando el estudiante escribe un problema en el chat:
+El sistema usa **dos proveedores de LLM genuinamente distintos**, cada uno con un rol fijo — no es el mismo modelo con dos prompts:
 
-| # | Rol | Qué hace |
-|---|---|---|
-| 1 | **Resolutor (LLM #1)** | Clasifica el enunciado en uno de los 6 módulos y construye el JSON de parámetros exacto (modo JSON estricto de Groq). Distingue problemas nuevos de preguntas de seguimiento. |
-| 2 | **Solver Service** | Ejecuta el algoritmo matemático real y devuelve solución + pasos. |
-| 3 | **Narrador** | Traduce la solución numérica a una recomendación de negocio en el chat. |
-| 4 | **Validador (LLM #2)** | Con prompt independiente y escéptico, **recalcula la aritmética por su cuenta** (valor objetivo, restricciones, fórmulas) y verifica que cada parámetro provenga del enunciado. Emite veredicto: ✅ válido / ⚠️ con observaciones / ❌ inválido, con los cálculos mostrados. |
+| # | Rol | Proveedor | Qué hace |
+|---|---|---|---|
+| 1 | **Resolutor** | Groq (`llama-3.3-70b-versatile`) | Clasifica el enunciado en uno de los 6 módulos y construye el JSON de parámetros exacto (modo JSON estricto). Distingue problemas nuevos de preguntas de seguimiento. |
+| 2 | **Solver Service** | — (Python) | Ejecuta el algoritmo matemático real y devuelve solución + pasos + análisis de sensibilidad. |
+| 3 | **Narrador / Tutor socrático** | Groq | Traduce la solución numérica a una recomendación de negocio, o guía con preguntas en modo socrático. Se llama en cada turno del chat, por eso usa el proveedor de mayor cuota. |
+| 4 | **Validador (independiente)** | Gemini (`gemini-2.5-flash`) | Con prompt propio y escéptico, **recalcula la aritmética por su cuenta** (valor objetivo, restricciones, fórmulas) y verifica que cada parámetro provenga del enunciado. Emite veredicto: ✅ válido / ⚠️ con observaciones / ❌ inválido, con los cálculos mostrados. |
+
+**Resiliencia ante rate-limit**: Groq maneja la interpretación y la tutoría (uso frecuente, así se conserva la cuota gratuita de Gemini), y Gemini valida de forma independiente. Si cualquiera de los dos agota su cuota (HTTP 429), el backend reintenta automáticamente con el otro proveedor antes de devolver un error al chat — el estudiante no se queda sin respuesta.
 
 **Modo socrático** 🎓 (interruptor en el chat): en lugar de resolver, el tutor hace 1–3 preguntas orientadoras por turno para que el estudiante identifique variables, función objetivo y restricciones por sí mismo — nunca revela el modelo completo ni el resultado, según lo exige la rúbrica.
 
@@ -108,6 +116,8 @@ Pipeline completo de aula: **Balanceo → Solución inicial (a elección) → Op
 
 La interfaz compara el costo inicial de los tres métodos y muestra cada iteración de MODI. *Verificado: converge al mismo óptimo que PuLP desde cualquiera de las tres soluciones iniciales.*
 
+**Análisis de sensibilidad**: además de la solución, el módulo calcula (vía PuLP: `pc.pi` para precios sombra, `pv.dj` para costo reducido) los **precios sombra** de cada origen/destino (cuánto bajaría el costo total si hubiera 1 unidad más de oferta o demanda) y el **costo de oportunidad** de las rutas que no se usan (cuánto subiría el costo total por cada unidad forzada por ahí). Ambas tablas se combinan en una vista **"Rutas principales vs. alternativas"**: las rutas que sí conviene tomar, ordenadas por volumen, junto con las que no conviene y cuánto costaría igual usarlas — respondiendo directamente qué rutas tomar y por qué.
+
 ### 3. Redes
 
 | Algoritmo | Problema | Detalle |
@@ -141,11 +151,24 @@ La interfaz compara el costo inicial de los tres métodos y muestra cada iteraci
 
 ---
 
+## Mapa real y rutas (Mapbox)
+
+Los módulos de **Transporte** y **Redes** (y el resumen general) muestran un mapa real de Ecuador con Mapbox GL JS, no solo un diagrama abstracto:
+
+- **Geocodificación real**: cada origen/destino del problema se resuelve a una coordenada real. Primero se busca en una tabla local de ciudades/hubs conocidos; si el nombre no está ahí (por ejemplo, un lugar que el estudiante escribió en el enunciado), se geocodifica en vivo contra la **Geocoding API de Mapbox**, restringida a Ecuador y cacheada en `localStorage` para no repetir búsquedas.
+- **Rutas viales reales**: la línea entre dos nodos se dibuja primero como línea recta (respuesta inmediata) y se reemplaza en cuanto llega la respuesta de la **Directions API de Mapbox** con la geometría real de la carretera — incluyendo la **distancia real en kilómetros**, mostrada en el mapa y en las tablas de rutas.
+- **Zoom hasta nivel de calle** (hasta z18): pensado para poder simular reparto **dentro de una misma ciudad** (varios locales/puntos de entrega), no solo rutas entre ciudades.
+- **Tema claro/oscuro**: el mapa cambia de estilo (`streets-v12` / `dark-v11`) junto con el resto de la interfaz.
+
+Requiere un token público de Mapbox (`VITE_MAPBOX_TOKEN`, ver [Variables de entorno](#variables-de-entorno)) — es un token `pk.*`, diseñado para exponerse en el cliente.
+
+---
+
 ## Cómo se usa
 
 1. **Por el chat (recomendado)** — abre el chat (🧠, abajo a la derecha), pega el enunciado del problema y envía. El tutor detecta el módulo, cambia de pestaña, resuelve, explica en el chat y valida con el segundo LLM. El dashboard muestra la solución y el detalle paso a paso.
 2. **Modo socrático** — activa el interruptor 🎓 del chat para que el tutor te guíe con preguntas en vez de resolver.
-3. **Manual** — en cualquier módulo, botón *"Editar Datos"* para llenar los parámetros con el editor visual (tablas de costos, variables, restricciones), luego *"Guardar y Resolver"* o *"Resolver"*.
+3. **Manual** — en cualquier módulo, botón *"Editar Datos"* para llenar los parámetros con un **formulario real** (tablas de costos, variables, restricciones, selector de algoritmo en Redes, selector de tipo de cálculo en Inventarios) — no una caja de JSON crudo — luego *"Guardar y Resolver"* o *"Resolver"*.
 4. **Evidencias** — botón *"Anexo IA (PDF)"* en la barra superior para descargar el registro de interacciones para el informe.
 
 Cada módulo tiene URL propia (`/lp`, `/transport`, `/networks`, `/ip`, `/dp`, `/inventories`): se puede recargar, compartir el enlace o usar atrás/adelante del navegador.
@@ -176,7 +199,7 @@ Base: `http://localhost:4000/api`
 | `GET` | `/models` | Modelos guardados con su última solución (PostgreSQL) |
 | `PUT` | `/models/:id` | Guarda parámetros **y resuelve** (persiste la solución) |
 | `POST` | `/lp/solve` | PL/PE — acepta `method`: `auto`/`simplex`/`dosfases`/`granm`/`none` |
-| `POST` | `/transport/solve` | Transporte — acepta `initial_method`: `vogel`/`noroeste`/`costo_minimo` |
+| `POST` | `/transport/solve` | Transporte — acepta `initial_method`: `vogel`/`noroeste`/`costo_minimo`; devuelve además `supply_duals`, `demand_duals` y `opportunity_costs` (sensibilidad) |
 | `POST` | `/networks/solve` | Redes — `algorithm`: `shortest_path`/`max_flow`/`min_cost_flow`/`min_spanning_tree` |
 | `POST` | `/dynamic/solve` | PD — `problem_type`: `knapsack`/`lot_sizing` |
 | `POST` | `/inventories/solve` | Inventarios — `calc_type`: ver tabla de modelos |
@@ -196,10 +219,10 @@ La documentación interactiva del Solver Service (FastAPI) está en `http://loca
 
 | Capa | Stack |
 |---|---|
-| **Frontend** | React 18, Vite 6, TypeScript, Tailwind CSS 4, shadcn/ui, react-router 7, motion (animaciones), Recharts, Leaflet (mapas) |
+| **Frontend** | React 18, Vite 6, TypeScript, Tailwind CSS 4, shadcn/ui, react-router 7, motion (animaciones), Recharts, Mapbox GL JS (mapa, Directions API, Geocoding API) |
 | **Backend** | Node.js 20, Express, TypeScript, Zod, Prisma (PostgreSQL), Mongoose (MongoDB), pdfkit |
 | **Solver** | Python 3.10, FastAPI, NumPy, PuLP + CBC, NetworkX, SciPy, sentence-transformers + ChromaDB (RAG) |
-| **IA** | Groq API — `llama-3.3-70b-versatile` (Resolutor, Narrador, Validador y Socrático con prompts independientes) |
+| **IA** | Groq API — `llama-3.3-70b-versatile` (Resolutor, Narrador, Socrático) + Google Gemini API — `gemini-2.5-flash` (Validador independiente), con fallback mutuo |
 | **Bases de datos** | PostgreSQL 15 (modelos y soluciones), MongoDB 6 (historial de interacciones IA) |
 | **Infraestructura** | Docker, Docker Compose |
 
@@ -210,6 +233,8 @@ La documentación interactiva del Solver Service (FastAPI) está en `http://loca
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) instalado y corriendo
 - Git
 - Una clave de API de [Groq](https://console.groq.com/) (gratuita)
+- Una clave de API de [Google Gemini](https://aistudio.google.com/apikey) (gratuita, para el Validador)
+- Un token público de [Mapbox](https://account.mapbox.com/access-tokens/) (gratuito, para el mapa)
 
 ---
 
@@ -220,8 +245,11 @@ Crea un archivo `.env` en la raíz del proyecto:
 ```env
 # Backend
 PORT=4000
-GROQ_API_KEY=gsk_...        # Clave de la API de Groq (requerida para el tutor)
-GEMINI_API_KEY=...          # Opcional (funciones futuras)
+GROQ_API_KEY=gsk_...              # Clave de la API de Groq (Resolutor/Narrador/Socrático)
+GEMINI_API_KEY=AIza...            # Clave de la API de Gemini (Validador independiente)
+
+# Frontend (se inyecta en build time — ver docker-compose.yml / frontend/Dockerfile)
+VITE_MAPBOX_TOKEN=pk....          # Token público de Mapbox (mapa, Directions, Geocoding)
 
 # PostgreSQL
 POSTGRES_USER=postgres
@@ -235,6 +263,8 @@ MONGO_DB=tech_logistics
 ```
 
 > ⚠️ El archivo `.env` está en `.gitignore`. Nunca lo subas al repositorio.
+>
+> `VITE_MAPBOX_TOKEN` es distinto a los otros: Vite lo incrusta en el bundle del frontend **en build time**, no en runtime. Si lo cambias, hay que reconstruir la imagen del frontend (`docker compose build frontend`), no solo reiniciar el contenedor.
 
 ---
 
@@ -286,7 +316,7 @@ tech-logistics-io/
 │   ├── prisma/                   # Esquema de PostgreSQL
 │   └── src/
 │       ├── controllers/          # tutor, solver, LP, auditoría, base de datos
-│       ├── services/             # groq.service (4 prompts LLM), rag.service, solver-client
+│       ├── services/             # groq.service, gemini.service, rag.service, solver-client
 │       ├── middlewares/          # audit.middleware (registro de interacciones)
 │       ├── repositories/         # audit.repository (log en archivo)
 │       ├── models/               # ia-interaction.model (Mongoose)
@@ -318,7 +348,7 @@ tech-logistics-io/
 
 ## Limitaciones conocidas
 
-- **Pasos no persistidos**: el flujo *"Guardar y Resolver"* persiste la solución en PostgreSQL, pero el detalle paso a paso (`steps`) solo vive en la sesión — se pierde al recargar. Persistirlo requiere una migración de Prisma.
+- **Persistencia de pasos inconsistente entre flujos**: cuando el modelo se resuelve vía el chat (interpretación → `PUT /models/:id`), la respuesta completa del solver (`steps`, `comparisons`, sensibilidad) se persiste en PostgreSQL y sobrevive a un recargo de página. Cuando se resuelve con el botón *"Resolver"* directo (`POST /{módulo}/solve`), el resultado solo vive en el estado de React de esa sesión — se pierde al recargar, y hay que volver a resolver.
 - **Simplex educativo**: el tableau paso a paso aplica solo a variables continuas con cota inferior 0 y sin cota superior; los modelos enteros/acotados se resuelven con CBC (sin tableau) y la interfaz lo indica.
 - **Log de auditoría efímero**: `audit_logs.json` vive dentro del contenedor del backend sin volumen — se reinicia al reconstruir el contenedor. El historial de chat en MongoDB sí persiste.
 - **Flujo de costo mínimo**: usa NetworkX sin trazado de pasos (los otros 3 algoritmos de redes sí lo tienen).
@@ -336,7 +366,9 @@ tech-logistics-io/
 
 | Rama | Propósito |
 |---|---|
-| `Prod` | Producción estable |
-| `DEV` | Desarrollo general del equipo |
-| `feature/rag` | Integración RAG con ChromaDB |
-| `feature/algorithms-fix` | Algoritmos completos del solver, tutor multi-LLM, modo socrático y anexo IA |
+| `Prod` | **Rama por defecto del repositorio en GitHub** — producción estable. Los Pull Requests se dirigen aquí. |
+| `DEV` | Desarrollo general del equipo; tiene una implementación anterior y más simple del tutor de IA (`ai.controller.ts`), superada por la de `feature/algorithms-fix`. |
+| `feature/rag` | Punto de partida para integrar RAG con ChromaDB (sin commits propios adicionales todavía). |
+| `feature/algorithms-fix` | Algoritmos completos del solver, tutor multi-LLM con fallback, modo socrático, anexo IA, mapa Mapbox y análisis de sensibilidad. |
+
+> ⚠️ `main` existe como rama pero está desactualizada (le falta incluso el commit base de Transporte/UI que ya tiene `Prod`) y **no** es la rama por defecto de GitHub — no usarla como destino de PRs.
