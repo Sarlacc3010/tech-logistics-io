@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:20-slim
 
 # Install OpenSSL (required by Prisma Client)
 RUN apt-get update -y && apt-get install -y openssl

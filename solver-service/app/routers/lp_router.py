@@ -4,6 +4,10 @@ from typing import List, Dict, Optional, Any
 import pulp
 import numpy as np
 import copy
+import re
+
+from app.algorithms.steps import SolutionStep
+from app.algorithms.lp.simplex import solve_standard_simplex, solve_two_phase, solve_big_m
 
 router = APIRouter()
 
@@ -24,6 +28,7 @@ class LPProblemInput(BaseModel):
     objective: str  # "maximize" or "minimize"
     variables: List[VariableInput]
     constraints: List[ConstraintInput]
+    method: Optional[str] = "auto"  # "auto", "simplex", "dosfases", "granm", "none"
 
 class VariableOutput(BaseModel):
     name: str
@@ -42,6 +47,21 @@ class LPSolutionOutput(BaseModel):
     objective_value: Optional[float] = None
     variables: List[VariableOutput]
     constraints: List[ConstraintOutput]
+    method_used: Optional[str] = None
+    steps: Optional[List[SolutionStep]] = None
+    steps_note: Optional[str] = None
+
+def _pulp_safe_name(name: str, prefix: str) -> str:
+    """PuLP reemplaza internamente espacios/caracteres inválidos en nombres de variables y
+    restricciones (ej. 'pruebas de calidad' -> 'pruebas_de_calidad'). Si luego se busca por el
+    nombre original en prob.constraints[...], truena con KeyError. Saneamos nosotros mismos el
+    nombre que le pasamos a PuLP, y mantenemos nuestros propios dicts indexados por el nombre
+    original tal como lo mandó el usuario/LLM."""
+    safe = re.sub(r'[^A-Za-z0-9_]', '_', name)
+    if not safe or safe[0].isdigit():
+        safe = f"{prefix}_{safe}"
+    return safe
+
 
 def solve_lp_helper(
     objective_str: str,
@@ -51,21 +71,21 @@ def solve_lp_helper(
     # Determine objective type
     sense = pulp.LpMaximize if objective_str.lower() == "maximize" else pulp.LpMinimize
     prob = pulp.LpProblem("TechLogistics_LP", sense)
-    
+
     # Create variables
     pulp_vars = {}
     for v in variables:
         cat = pulp.LpInteger if v.isInteger else pulp.LpContinuous
         pulp_vars[v.name] = pulp.LpVariable(
-            v.name,
+            _pulp_safe_name(v.name, "var"),
             lowBound=v.lowBound,
             upBound=v.upBound,
             cat=cat
         )
-        
+
     # Objective function
     prob += pulp.lpSum([v.objCoef * pulp_vars[v.name] for v in variables])
-    
+
     # Constraints
     pulp_constrs = {}
     for c in constraints:
@@ -78,9 +98,10 @@ def solve_lp_helper(
             constr_obj = (expr == c.rhs)
         else:
             raise ValueError(f"Invalid operator: {c.operator}")
-        
-        prob += constr_obj, c.name
-        pulp_constrs[c.name] = prob.constraints[c.name]
+
+        safe_cname = _pulp_safe_name(c.name, "c")
+        prob += constr_obj, safe_cname
+        pulp_constrs[c.name] = prob.constraints[safe_cname]
         
     # Solve the problem
     # Using default solver (CBC) and quiet mode
@@ -159,7 +180,7 @@ def solve_lp(payload: LPProblemInput):
                     if pulp.LpStatus[temp_status] != "Optimal":
                         rhs_low = current_rhs + step
                         break
-                    temp_pc = temp_prob.constraints[c.name]
+                    temp_pc = temp_prob.constraints[_pulp_safe_name(c.name, "c")]
                     if abs(temp_pc.pi - shadow_price) > 1e-4:
                         rhs_low = current_rhs
                         break
@@ -177,7 +198,7 @@ def solve_lp(payload: LPProblemInput):
                     if pulp.LpStatus[temp_status] != "Optimal":
                         rhs_high = current_rhs - step
                         break
-                    temp_pc = temp_prob.constraints[c.name]
+                    temp_pc = temp_prob.constraints[_pulp_safe_name(c.name, "c")]
                     if abs(temp_pc.pi - shadow_price) > 1e-4:
                         rhs_high = current_rhs
                         break
@@ -197,12 +218,59 @@ def solve_lp(payload: LPProblemInput):
                 rhsHigh=rhs_high if (rhs_high is not None and not np.isinf(rhs_high)) else None
             ))
             
+        method_used, steps, steps_note = _build_steps(payload)
+
         return LPSolutionOutput(
             status=status_str,
             objective_value=obj_val,
             variables=var_results,
-            constraints=constr_results
+            constraints=constr_results,
+            method_used=method_used,
+            steps=steps,
+            steps_note=steps_note
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _build_steps(payload: LPProblemInput):
+    """Corre el motor Simplex tabular propio para exponer el detalle paso a paso pedido por
+    la rúbrica (Simplex / Dos Fases / Gran M). Solo soporta variables continuas con cota
+    inferior 0 y sin cota superior; para PLE o variables acotadas se usa únicamente CBC
+    (arriba) y aquí se explica por qué no hay pasos."""
+    if payload.method == "none":
+        return None, None, None
+
+    unsupported = any(
+        v.isInteger or v.upBound is not None or (v.lowBound not in (0.0, None))
+        for v in payload.variables
+    )
+    if unsupported:
+        return None, None, (
+            "El tableau paso a paso no está disponible para este modelo: el motor Simplex "
+            "educativo solo soporta variables continuas con cota inferior 0 y sin cota superior "
+            "(no variables enteras/binarias ni acotadas). El resultado numérico de arriba sí es "
+            "exacto, calculado con CBC."
+        )
+
+    try:
+        var_names = [v.name for v in payload.variables]
+        obj_coeffs = [v.objCoef for v in payload.variables]
+        constraints_dicts = [
+            {"name": c.name, "coefficients": c.coefficients, "operator": c.operator, "rhs": c.rhs}
+            for c in payload.constraints
+        ]
+        requested = (payload.method or "auto").lower()
+        has_ge_or_eq = any(c.operator != "<=" for c in payload.constraints)
+
+        if requested == "simplex" or (requested == "auto" and not has_ge_or_eq):
+            result = solve_standard_simplex(payload.objective, var_names, obj_coeffs, constraints_dicts)
+        elif requested == "granm":
+            result = solve_big_m(payload.objective, var_names, obj_coeffs, constraints_dicts)
+        else:  # "dosfases" o "auto" con restricciones >= / =
+            result = solve_two_phase(payload.objective, var_names, obj_coeffs, constraints_dicts)
+
+        return result["method"], result["steps"], None
+    except Exception as step_err:
+        return None, None, f"No se pudo generar el detalle paso a paso: {step_err}"

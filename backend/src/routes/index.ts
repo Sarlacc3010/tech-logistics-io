@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { solveLP } from '../controllers/linear-programming.controller';
-import { askTutor } from '../controllers/gemini.controller';
-import { getAuditLogs } from '../controllers/audit.controller';
+import { askTutor, interpretProblem, validateSolution, socraticGuidance } from '../controllers/tutor.controller';
+import { getAuditLogs, getInteractionAnnex } from '../controllers/audit.controller';
 import { auditMiddleware } from '../middlewares/audit.middleware';
 import {
   solveTransport,
@@ -24,10 +24,18 @@ router.post('/networks/solve', auditMiddleware('solver_networks'), solveNetworks
 router.post('/dynamic/solve', auditMiddleware('solver_dynamic'), solveDynamic);
 router.post('/inventories/solve', auditMiddleware('solver_inventories'), solveInventories);
 
-// Gemini AI Tutor endpoint (with audit logging)
-router.post('/tutor/ask', auditMiddleware('gemini_tutor'), askTutor);
+// Groq AI Tutor endpoints (with audit logging)
+router.post('/tutor/ask', auditMiddleware('groq_tutor'), askTutor);
+router.post('/tutor/interpret', auditMiddleware('groq_tutor_interpret'), interpretProblem);
+router.post('/tutor/validate', auditMiddleware('groq_tutor_validate'), validateSolution);
+router.post('/tutor/socratic', auditMiddleware('groq_tutor_socratic'), socraticGuidance);
+
+// Document upload route for RAG
+import uploadRoutes from './upload.routes';
+router.use('/tutor', uploadRoutes);
 
 // Audit logs retrieval
 router.get('/audit/logs', getAuditLogs);
+router.get('/audit/annex', getInteractionAnnex);
 
 export default router;

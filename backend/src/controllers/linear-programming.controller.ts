@@ -20,7 +20,8 @@ const ConstraintInputSchema = z.object({
 const LPProblemSchema = z.object({
   objective: z.enum(['maximize', 'minimize', 'MAXIMIZE', 'MINIMIZE']),
   variables: z.array(VariableInputSchema),
-  constraints: z.array(ConstraintInputSchema)
+  constraints: z.array(ConstraintInputSchema),
+  method: z.enum(['auto', 'simplex', 'dosfases', 'granm', 'none']).nullable().optional()
 });
 
 export async function solveLP(req: Request, res: Response, next: NextFunction) {

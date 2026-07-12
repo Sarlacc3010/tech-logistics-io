@@ -8,7 +8,8 @@ const TransportProblemSchema = z.object({
   destinations: z.array(z.string()),
   supply: z.array(z.number()),
   demand: z.array(z.number()),
-  costs: z.array(z.array(z.number()))
+  costs: z.array(z.array(z.number())),
+  initial_method: z.enum(['noroeste', 'costo_minimo', 'vogel']).nullable().optional()
 });
 
 const EdgeInputSchema = z.object({
@@ -33,7 +34,7 @@ const DPProblemSchema = z.object({
 });
 
 const InventoryProblemSchema = z.object({
-  calc_type: z.enum(['eoq', 'abc']),
+  calc_type: z.enum(['eoq', 'abc', 'eoq_discounts', 'eoq_backorders', 'epq', 'reorder_point']),
   parameters: z.record(z.any())
 });
 
@@ -60,7 +61,23 @@ export async function solveTransport(req: Request, res: Response, next: NextFunc
 
 export async function solveNetworks(req: Request, res: Response, next: NextFunction) {
   try {
-    const parseResult = NetworkProblemSchema.safeParse(req.body);
+    const mappedBody = {
+      ...req.body,
+      algorithm: req.body.algorithm ?? 'min_cost_flow',
+      edges: Array.isArray(req.body.edges) 
+        ? req.body.edges.map((e: any) => ({
+            source: e.from ?? e.source,
+            target: e.to ?? e.target,
+            capacity: e.capacity,
+            weight: e.cost ?? e.weight
+          }))
+        : []
+    };
+    if (req.body.supply_demand && !mappedBody.demands) {
+      mappedBody.demands = req.body.supply_demand;
+    }
+
+    const parseResult = NetworkProblemSchema.safeParse(mappedBody);
     if (!parseResult.success) {
       return res.status(400).json({
         status: 'error',
@@ -102,7 +119,21 @@ export async function solveDynamic(req: Request, res: Response, next: NextFuncti
 
 export async function solveInventories(req: Request, res: Response, next: NextFunction) {
   try {
-    const parseResult = InventoryProblemSchema.safeParse(req.body);
+    let mappedBody = req.body;
+    if (!req.body.calc_type && (req.body.demandRate !== undefined || req.body.sku !== undefined)) {
+      mappedBody = {
+        calc_type: 'eoq',
+        parameters: {
+          annual_demand: req.body.demandRate ?? 1000,
+          setup_cost: req.body.setupCost ?? 150,
+          holding_cost: req.body.holdingCost ?? 2.5,
+          lead_time_days: req.body.leadTime ?? 7,
+          sku: req.body.sku ?? "TL-A0041"
+        }
+      };
+    }
+
+    const parseResult = InventoryProblemSchema.safeParse(mappedBody);
     if (!parseResult.success) {
       return res.status(400).json({
         status: 'error',
