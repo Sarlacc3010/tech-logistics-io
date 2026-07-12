@@ -286,6 +286,15 @@ docker-compose up -d --build
 docker-compose ps
 ```
 
+> ⏱️ El primer build tarda unos minutos (el `solver-service` instala PyTorch +
+> sentence-transformers + ChromaDB para el RAG de PDFs). Los builds siguientes
+> en la misma máquina son bastante más rápidos: `pip`/`npm` reutilizan sus
+> paquetes ya descargados (cache de BuildKit) y Docker solo reinstala si
+> `requirements.txt`/`package.json` cambiaron. `sentence-transformers` instala
+> la build de PyTorch **solo-CPU** (no la de CUDA, mucho más pesada) porque
+> aquí no hace falta GPU — esto por sí solo recorta el build en varios minutos
+> y varios GB.
+
 Una vez levantado:
 
 | Servicio | URL |
