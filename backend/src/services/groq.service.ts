@@ -15,9 +15,14 @@ function handleGroqError(error: unknown): string {
   }
   return 'Ocurrió un error inesperado al comunicarse con el asistente. Intenta de nuevo.';
 }
+
+/** true si el error de Groq es un 429 (rate limit / cuota), para permitir fallback a Gemini. */
+function isGroqQuotaError(error: unknown): boolean {
+  return error instanceof APIError && error.status === 429;
+}
 import { RagService } from "./rag.service";
 
-const VALIDATE_SYSTEM_PROMPT = `
+export const VALIDATE_SYSTEM_PROMPT = `
 Eres el "Validador Matemático Independiente" de un tutor de Investigación Operativa. Tu trabajo es
 auditar, con ojo crítico y escéptico, el trabajo de OTRO modelo de IA (el "Resolutor") que ya
 interpretó un enunciado y obtuvo una solución. NO confíes en que el Resolutor hizo bien su trabajo:
@@ -65,7 +70,7 @@ si todo es correcto pero hay algo ambiguo o que el estudiante debería revisar. 
 cuadra. Sé estricto: si algo no cuadra numéricamente, repórtalo aunque sea una diferencia pequeña.
 `;
 
-const SOCRATIC_MODULE_FOCUS: Record<string, string> = {
+export const SOCRATIC_MODULE_FOCUS: Record<string, string> = {
   lp: "identificar las variables de decisión, plantear correctamente la función objetivo (maximizar o minimizar qué) y derivar cada restricción (qué recurso limita, con qué operador y qué cantidad disponible), terminando en no negatividad.",
   ip: "lo mismo que Programación Lineal, pero además distinguir cuáles variables deben ser enteras o binarias y por qué (ej. no se puede abrir media sucursal, no se puede comprar medio camión).",
   transport: "identificar orígenes y destinos, verificar si la oferta total y la demanda total están balanceadas, y entender la tabla de costos unitarios antes de pensar en un método de solución.",
@@ -74,7 +79,7 @@ const SOCRATIC_MODULE_FOCUS: Record<string, string> = {
   inventories: "identificar la demanda, el costo de ordenar y el costo de mantener inventario, y qué supuestos del modelo EOQ (o su variante) se cumplen o no en este caso.",
 };
 
-const SOCRATIC_SYSTEM_PROMPT_BASE = `
+export const SOCRATIC_SYSTEM_PROMPT_BASE = `
 Eres un tutor SOCRÁTICO de Investigación Operativa. Tu única forma de enseñar es haciendo preguntas
 que guíen al estudiante a razonar por sí mismo — NUNCA le entregas el modelo matemático completo,
 la solución, ni resuelves el problema por él, aunque te lo pida directamente.
@@ -90,7 +95,7 @@ Reglas estrictas:
 6. Usa un tono cercano y alentador, como un profesor ayudante, no como un examinador.
 `;
 
-const INTERPRET_SYSTEM_PROMPT = `
+export const INTERPRET_SYSTEM_PROMPT = `
 Eres el módulo "Resolutor" de un tutor socrático de Investigación Operativa. Tu única tarea es
 leer un enunciado de problema en lenguaje natural (español), decidir cuál de los 6 módulos de la
 plataforma le corresponde, y construir el JSON de parámetros exacto que ese módulo necesita.
@@ -178,22 +183,43 @@ Nunca dejes "data" incompleto ni con campos fuera de la forma indicada. No agreg
 IMPORTANTE: cada valor numérico del JSON debe ser un número literal ya calculado (ej. 70000). Nunca escribas una
 expresión aritmética sin evaluar como valor (ej. NUNCA escribas 120000 - 50000 o "150000-70000"); si necesitas
 combinar dos datos del enunciado (como beneficio menos costo), calcula tú mismo el resultado y escribe solo el número final.
+
+MODO EDICIÓN INCREMENTAL: si el mensaje viene precedido de un bloque "MODELO ACTUAL DEL ESTUDIANTE" (el JSON que ya
+tiene cargado en el módulo activo) y el mensaje pide una MODIFICACIÓN a ESE modelo en vez de un problema nuevo y
+distinto (ej. "agrega esta bodega también", "quiero que también vayas a Machachi por $80", "cambia el costo de la
+restricción C1 a 500", "agrega este nodo con esta capacidad"), entonces:
+- isNewProblem debe ser true.
+- moduleType debe ser el MISMO módulo del modelo actual (el que viene en el bloque).
+- data debe ser el JSON COMPLETO ACTUALIZADO: todo el contenido del modelo actual tal cual, más el cambio pedido ya
+  aplicado (ej. agrega el nuevo origen/destino a sus listas y extiende la matriz "costs" con la fila/columna nueva;
+  agrega el nuevo nodo/arco a "nodes"/"edges"; agrega la restricción nueva al arreglo "constraints"; etc.). No
+  borres ni modifiques nada que el estudiante no haya pedido cambiar.
+- explanation debe decir explícitamente qué se agregó o cambió respecto al modelo anterior (1-2 frases).
+Si el mensaje, aunque exista un modelo actual, describe un problema TOTALMENTE distinto y no relacionado, ignora el
+modelo actual e interpreta desde cero como siempre.
 `;
 
 export class GroqService {
-  static async interpretProblem(userMessage: string): Promise<{ isNewProblem: boolean; moduleType: string | null; data: any; explanation: string }> {
+  static async interpretProblem(
+    userMessage: string,
+    currentModel?: { moduleType: string; data?: any }
+  ): Promise<{ isNewProblem: boolean; moduleType: string | null; data: any; explanation: string }> {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
       throw new Error('GROQ_API_KEY is not defined in environment variables');
     }
     const groq = new Groq({ apiKey });
 
+    const userContent = currentModel
+      ? `MODELO ACTUAL DEL ESTUDIANTE (módulo: ${currentModel.moduleType}):\n${JSON.stringify(currentModel.data)}\n\nMensaje del estudiante:\n${userMessage}`
+      : userMessage;
+
     let chatCompletion: any;
     try {
       chatCompletion = await groq.chat.completions.create({
         messages: [
           { role: 'system', content: INTERPRET_SYSTEM_PROMPT },
-          { role: 'user', content: userMessage }
+          { role: 'user', content: userContent }
         ],
         model: "llama-3.3-70b-versatile",
         temperature: 0.1,
@@ -201,7 +227,9 @@ export class GroqService {
         response_format: { type: "json_object" }
       });
     } catch (err) {
-      // Devuelve isNewProblem=false con el mensaje de error como explanation.
+      // Si es rate limit, relanza para que el controlador haga fallback a Gemini.
+      if (isGroqQuotaError(err)) throw err;
+      // Otros errores: devuelve isNewProblem=false con el mensaje como explanation.
       return { isNewProblem: false, moduleType: null, data: null, explanation: handleGroqError(err) };
     }
 
@@ -325,6 +353,7 @@ ${JSON.stringify(solvedSolution, null, 2)}
         max_tokens: 500,
       });
     } catch (err) {
+      if (isGroqQuotaError(err)) throw err;
       return handleGroqError(err);
     }
 
@@ -399,6 +428,7 @@ ${ragContext}
       return chatCompletion.choices[0]?.message?.content || "Lo siento, no pude procesar tu solicitud.";
     } catch (error) {
       console.error("Error calling Groq API:", error);
+      if (isGroqQuotaError(error)) throw error;
       return handleGroqError(error);
     }
   }

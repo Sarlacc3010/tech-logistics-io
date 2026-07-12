@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import numpy as np
 import pulp
+import re
 
 from app.algorithms.steps import SolutionStep
 from app.algorithms.transport.utils import balance_transport_problem
@@ -12,6 +13,13 @@ from app.algorithms.transport.vogel import vogel
 from app.algorithms.transport.modi import modi_optimize
 
 router = APIRouter()
+
+
+def _pulp_safe_name(name: str) -> str:
+    """PuLP sanea internamente espacios/caracteres inválidos en nombres de restricciones
+    (ej. 'Supply_Nueva York' -> 'Supply_Nueva_York'). Saneamos nosotros mismos el nombre
+    al crearlo para poder volver a buscarlo en prob.constraints[...] sin KeyError."""
+    return re.sub(r'[^A-Za-z0-9_]', '_', name)
 
 INITIAL_METHODS = {
     "noroeste": northwest_corner,
@@ -38,6 +46,16 @@ class TransportMethodResult(BaseModel):
     total_cost: float
     allocations: List[RouteAllocation]
 
+class ConstraintDual(BaseModel):
+    name: str
+    shadow_price: float
+    slack: float
+
+class RouteSensitivity(BaseModel):
+    origin: str
+    destination: str
+    opportunity_cost: float
+
 class TransportSolutionOutput(BaseModel):
     status: str
     total_cost: float
@@ -47,6 +65,9 @@ class TransportSolutionOutput(BaseModel):
     initial_solution: Optional[TransportMethodResult] = None
     steps: Optional[List[SolutionStep]] = None
     steps_note: Optional[str] = None
+    supply_duals: Optional[List[ConstraintDual]] = None
+    demand_duals: Optional[List[ConstraintDual]] = None
+    opportunity_costs: Optional[List[RouteSensitivity]] = None
 
 @router.post("/solve", response_model=TransportSolutionOutput)
 def solve_transport(payload: TransportProblemInput):
@@ -110,11 +131,13 @@ def solve_transport(payload: TransportProblemInput):
         
         # Supply constraints
         for i in range(n_origins):
-            prob += pulp.lpSum([vars[i][j] for j in range(n_destinations)]) <= payload.supply[i], f"Supply_{payload.origins[i]}"
-            
+            supply_name = _pulp_safe_name(f"Supply_{payload.origins[i]}")
+            prob += pulp.lpSum([vars[i][j] for j in range(n_destinations)]) <= payload.supply[i], supply_name
+
         # Demand constraints
         for j in range(n_destinations):
-            prob += pulp.lpSum([vars[i][j] for i in range(n_origins)]) >= payload.demand[j], f"Demand_{payload.destinations[j]}"
+            demand_name = _pulp_safe_name(f"Demand_{payload.destinations[j]}")
+            prob += pulp.lpSum([vars[i][j] for i in range(n_origins)]) >= payload.demand[j], demand_name
             
         # Solve
         solver = pulp.PULP_CBC_CMD(msg=False)
@@ -135,7 +158,40 @@ def solve_transport(payload: TransportProblemInput):
                         units=val,
                         cost=val * cost_matrix[i][j]
                     ))
-                    
+
+        # Análisis de sensibilidad: precios sombra de oferta/demanda (pc.pi) y costo de
+        # oportunidad de las rutas no usadas (pv.dj), igual que en el módulo de LP.
+        supply_duals = []
+        for i in range(n_origins):
+            c = prob.constraints[_pulp_safe_name(f"Supply_{payload.origins[i]}")]
+            supply_duals.append(ConstraintDual(
+                name=payload.origins[i],
+                shadow_price=c.pi if c.pi is not None else 0.0,
+                slack=c.slack if c.slack is not None else 0.0,
+            ))
+
+        demand_duals = []
+        for j in range(n_destinations):
+            c = prob.constraints[_pulp_safe_name(f"Demand_{payload.destinations[j]}")]
+            demand_duals.append(ConstraintDual(
+                name=payload.destinations[j],
+                shadow_price=c.pi if c.pi is not None else 0.0,
+                slack=c.slack if c.slack is not None else 0.0,
+            ))
+
+        opportunity_costs = []
+        for i in range(n_origins):
+            for j in range(n_destinations):
+                val = vars[i][j].varValue
+                if val is None or val <= 1e-9:
+                    dj = vars[i][j].dj if vars[i][j].dj is not None else 0.0
+                    opportunity_costs.append(RouteSensitivity(
+                        origin=payload.origins[i],
+                        destination=payload.destinations[j],
+                        opportunity_cost=dj,
+                    ))
+        opportunity_costs.sort(key=lambda r: r.opportunity_cost)
+
         return TransportSolutionOutput(
             status=status_str,
             total_cost=pulp.value(prob.objective),
@@ -144,6 +200,9 @@ def solve_transport(payload: TransportProblemInput):
             initial_method_used=initial_key,
             initial_solution=TransportMethodResult(**initial_result),
             steps=steps,
+            supply_duals=supply_duals,
+            demand_duals=demand_duals,
+            opportunity_costs=opportunity_costs,
             steps_note=steps_note
         )
         

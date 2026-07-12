@@ -1,9 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 import { GroqService } from '../services/groq.service';
+import { GeminiService } from '../services/gemini.service';
 import { z } from 'zod';
 
 const InterpretRequestSchema = z.object({
-  userMessage: z.string().min(1)
+  userMessage: z.string().min(1),
+  // Modelo activo del módulo actual, para que el LLM pueda detectar ediciones
+  // incrementales ("agrega también este origen") en vez de tratar el mensaje
+  // siempre como un problema nuevo desde cero.
+  currentModel: z.object({
+    moduleType: z.string(),
+    data: z.any()
+  }).optional()
 });
 
 const ValidateRequestSchema = z.object({
@@ -36,6 +44,10 @@ const TutorRequestSchema = z.object({
   ).optional()
 });
 
+// ─── Interpret Problem ────────────────────────────────────────────────────────
+// Groq (Resolutor) es el primario: así no se consume la cuota diaria gratuita
+// de Gemini en cada mensaje del chat. Si Groq alcanza SU propio rate limit
+// (429), se hace fallback a Gemini para no dejar al usuario sin respuesta.
 export async function interpretProblem(req: Request, res: Response, next: NextFunction) {
   try {
     const parseResult = InterpretRequestSchema.safeParse(req.body);
@@ -47,20 +59,23 @@ export async function interpretProblem(req: Request, res: Response, next: NextFu
       });
     }
 
-    const { isNewProblem, moduleType, data, explanation } = await GroqService.interpretProblem(parseResult.data.userMessage);
+    let result;
+    try {
+      result = await GroqService.interpretProblem(parseResult.data.userMessage, parseResult.data.currentModel);
+    } catch (groqError) {
+      console.error('Groq interpretProblem alcanzó su límite, usando Gemini como respaldo:', groqError);
+      result = await GeminiService.interpretProblem(parseResult.data.userMessage, parseResult.data.currentModel);
+    }
 
-    res.status(200).json({
-      status: 'success',
-      isNewProblem,
-      moduleType,
-      data,
-      explanation
-    });
+    const { isNewProblem, moduleType, data, explanation } = result;
+    res.status(200).json({ status: 'success', isNewProblem, moduleType, data, explanation });
   } catch (error) {
     next(error);
   }
 }
 
+// ─── Validate Solution ────────────────────────────────────────────────────────
+// Gemini primero → Groq como fallback.
 export async function validateSolution(req: Request, res: Response, next: NextFunction) {
   try {
     const parseResult = ValidateRequestSchema.safeParse(req.body);
@@ -73,17 +88,28 @@ export async function validateSolution(req: Request, res: Response, next: NextFu
     }
 
     const { originalMessage, moduleType, data, solvedSolution } = parseResult.data;
-    const result = await GroqService.validateSolution(originalMessage, moduleType, data, solvedSolution);
 
-    res.status(200).json({
-      status: 'success',
-      ...result
-    });
+    let result;
+    let validatedBy = 'gemini';
+    try {
+      result = await GeminiService.validateSolution(originalMessage, moduleType, data, solvedSolution);
+    } catch (geminiError) {
+      console.error('Gemini validateSolution quota/error, falling back to Groq:', geminiError);
+      validatedBy = 'groq_fallback';
+      result = await GroqService.validateSolution(originalMessage, moduleType, data, solvedSolution);
+    }
+
+    res.status(200).json({ status: 'success', validatedBy, ...result });
   } catch (error) {
     next(error);
   }
 }
 
+// ─── Socratic Guidance ────────────────────────────────────────────────────────
+// Groq (Tutor Socrático) es el primario: esta ruta se llama en cada turno del
+// chat, así que usar Gemini aquí por defecto agotaría su cuota diaria gratuita
+// en minutos. Si Groq alcanza SU propio rate limit (429), se hace fallback a
+// Gemini para no dejar al estudiante sin respuesta.
 export async function socraticGuidance(req: Request, res: Response, next: NextFunction) {
   try {
     const parseResult = SocraticRequestSchema.safeParse(req.body);
@@ -96,17 +122,24 @@ export async function socraticGuidance(req: Request, res: Response, next: NextFu
     }
 
     const { activeModule, userMessage, chatHistory } = parseResult.data;
-    const reply = await GroqService.socraticGuidance(activeModule, userMessage, chatHistory || []);
 
-    res.status(200).json({
-      status: 'success',
-      reply
-    });
+    let reply: string;
+    try {
+      reply = await GroqService.socraticGuidance(activeModule, userMessage, chatHistory || []);
+    } catch (groqError) {
+      console.error('Groq socraticGuidance alcanzó su límite, usando Gemini como respaldo:', groqError);
+      reply = await GeminiService.socraticGuidance(activeModule, userMessage, chatHistory || []);
+    }
+
+    res.status(200).json({ status: 'success', reply });
   } catch (error) {
     next(error);
   }
 }
 
+// ─── Ask Tutor ────────────────────────────────────────────────────────────────
+// Groq (Narrador/Tutor Ejecutivo) es el primario, igual que socraticGuidance.
+// Si Groq alcanza SU propio rate limit (429), se hace fallback a Gemini.
 export async function askTutor(req: Request, res: Response, next: NextFunction) {
   try {
     const parseResult = TutorRequestSchema.safeParse(req.body);
@@ -120,17 +153,25 @@ export async function askTutor(req: Request, res: Response, next: NextFunction) 
 
     const { problemContext, mathematicalSolution, userMessage, chatHistory } = parseResult.data;
 
-    const reply = await GroqService.generateSocraticResponse(
-      problemContext,
-      mathematicalSolution || {},
-      userMessage,
-      chatHistory || []
-    );
+    let reply: string;
+    try {
+      reply = await GroqService.generateSocraticResponse(
+        problemContext,
+        mathematicalSolution || {},
+        userMessage,
+        chatHistory || []
+      );
+    } catch (groqError) {
+      console.error('Groq generateSocraticResponse alcanzó su límite, usando Gemini como respaldo:', groqError);
+      reply = await GeminiService.generateSocraticResponse(
+        problemContext,
+        mathematicalSolution || {},
+        userMessage,
+        chatHistory || []
+      );
+    }
 
-    res.status(200).json({
-      status: 'success',
-      reply
-    });
+    res.status(200).json({ status: 'success', reply });
   } catch (error) {
     next(error);
   }

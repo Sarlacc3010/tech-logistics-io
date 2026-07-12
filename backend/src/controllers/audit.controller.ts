@@ -68,9 +68,16 @@ async function buildAnexoRows(): Promise<AnexoRow[]> {
       respuesta = response.reply || '';
     }
 
+    let herramienta = 'Groq API — Llama 3.3 70B Versatile';
+    if (log.type === 'groq_tutor_validate') {
+      herramienta = response.validatedBy === 'groq_fallback'
+        ? 'Groq API — Llama 3.3 70B Versatile (respaldo, Gemini no disponible)'
+        : 'Google Gemini 2.5 Flash';
+    }
+
     rows.push({
       fecha: log.timestamp,
-      herramienta: 'Groq API — Llama 3.3 70B Versatile',
+      herramienta,
       objetivo: OBJETIVO_POR_TIPO[log.type] || log.type,
       prompt: truncate(prompt),
       respuesta: truncate(respuesta),
