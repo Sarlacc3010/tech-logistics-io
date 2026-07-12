@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, Fragment } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useParams, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -9,11 +9,11 @@ import {
 } from "recharts";
 import {
   Sun, Moon, TrendingUp, Truck, Network, GitBranch, Layers, Package,
-  LayoutDashboard, MessageSquare, X, Send, Bell, Search, Settings,
+  LayoutDashboard, MessageSquare, X, Send, Search, Settings,
   ChevronRight, Download, RefreshCw, Filter, MapPin, Activity,
   ArrowUpRight, ArrowDownRight, Brain, Zap, Menu, Globe,
   AlertTriangle, CheckCircle2, Clock, Info, ChevronDown,
-  ChevronsLeft, ChevronsRight, Terminal, Paperclip, Check
+  ChevronsLeft, ChevronsRight, Terminal, Paperclip, Check, Trash2
 } from "lucide-react";
 import { TransportEditor } from "../components/TransportEditor";
 import { LPEditor } from "../components/LPEditor";
@@ -40,7 +40,7 @@ interface Module {
 const MODULES: Module[] = [
   { id: "overview",    label: "Panel de Control",         shortLabel: "Resumen",     icon: LayoutDashboard, description: "KPIs globales y operaciones en vivo" },
   { id: "lp",         label: "Programación Lineal",      shortLabel: "PL",          icon: TrendingUp,      description: "Método Simplex y análisis dual" },
-  { id: "transport",  label: "Modelo de Transporte",     shortLabel: "Transporte",  icon: Truck,           description: "Optimización de rutas y transportistas", badge: "3" },
+  { id: "transport",  label: "Modelo de Transporte",     shortLabel: "Transporte",  icon: Truck,           description: "Optimización de rutas y transportistas" },
   { id: "networks",   label: "Modelos de Redes",         shortLabel: "Redes",       icon: Network,         description: "Flujo de costo mínimo y enrutamiento" },
   { id: "ip",         label: "Programación Entera",      shortLabel: "PE / MIP",    icon: GitBranch,       description: "Algoritmo Branch & Bound" },
   { id: "dp",         label: "Programación Dinámica",    shortLabel: "PD",          icon: Layers,          description: "Ecuaciones de Bellman y etapas" },
@@ -192,6 +192,12 @@ const ROUTES = [
   { from: "RTM", to: "DXB", active: true  },
 ];
 
+// Referencia estable (misma identidad de array en cada render) para el centro
+// por defecto del mapa: si se pasara un literal `[a, b]` inline en el JSX se
+// recrearía en cada render y el useEffect de LogisticsMap (que depende de la
+// identidad de defaultCenter) reiniciaría el mapa entero innecesariamente.
+const ECUADOR_DEFAULT_CENTER: [number, number] = [-1.8312, -78.1834];
+
 const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }> = {
   // Transport hubs
   "Seattle": { name: "Quito", coords: [-0.1807, -78.4678] },
@@ -234,11 +240,96 @@ const ECUADOR_CITIES: Record<string, { name: string, coords: [number, number] }>
   "Node_6": { name: "Tena (Nodo 6)", coords: [-0.9938, -77.8129] },
 };
 
-function getCityInfo(key: string) {
+// ─── Mapbox ─────────────────────────────────────────────────────────────────
+// Token público (pk.*): diseñado para exponerse en el cliente, restringible por
+// dominio desde el dashboard de Mapbox. Se inyecta en build time vía Vite.
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+if (typeof window !== "undefined" && (window as any).mapboxgl && MAPBOX_TOKEN) {
+  (window as any).mapboxgl.accessToken = MAPBOX_TOKEN;
+}
+
+// Todas las coordenadas de la app se manejan como [lat, lng] (igual que antes
+// con Leaflet); esta función solo convierte al orden [lng, lat] que exige la
+// API de Mapbox GL justo en el borde donde se llama a sus métodos.
+function toLngLat([lat, lng]: [number, number]): [number, number] {
+  return [lng, lat];
+}
+
+// ─── Geocodificación real vía Mapbox ───────────────────────────────────────────
+// Los resultados se cachean en localStorage para no repetir búsquedas ya resueltas.
+const GEOCODE_CACHE_KEY = "tl_geocode_cache_v2";
+
+function loadGeocodeCache(): Record<string, [number, number]> {
+  try {
+    const raw = localStorage.getItem(GEOCODE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveGeocodeCache(cache: Record<string, [number, number]>) {
+  try {
+    localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // localStorage lleno o no disponible; no es crítico, se recalculará después.
+  }
+}
+
+const geocodeCache: Record<string, [number, number]> = loadGeocodeCache();
+
+// Busca coordenadas reales vía la Geocoding API de Mapbox para un nombre de
+// lugar (ej. "Cayambe"), restringido a Ecuador. Devuelve null si no lo
+// encuentra, si falla la red, o si no hay token configurado.
+async function geocodePlaceMapbox(name: string): Promise<[number, number] | null> {
+  const key = name.trim().toLowerCase();
+  if (!key || !MAPBOX_TOKEN) return null;
+  if (geocodeCache[key]) return geocodeCache[key];
+
+  try {
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(name)}.json?access_token=${MAPBOX_TOKEN}&country=ec&limit=1&language=es`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const feature = data?.features?.[0];
+    if (feature?.center) {
+      // Mapbox devuelve [lng, lat]; lo guardamos como [lat, lng] para ser
+      // consistente con el resto de la tabla de coordenadas de la app.
+      const coords: [number, number] = [feature.center[1], feature.center[0]];
+      geocodeCache[key] = coords;
+      saveGeocodeCache(geocodeCache);
+      return coords;
+    }
+  } catch (err) {
+    console.warn("Geocodificación Mapbox falló para", name, err);
+  }
+  return null;
+}
+
+// Número estable en [0,1) a partir de un string: último recurso para ubicar
+// nodos que ni la tabla conocida ni OpenStreetMap pudieron resolver.
+function hashStringToUnit(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return (Math.abs(hash) % 100000) / 100000;
+}
+
+function hashToEcuadorCoords(key: string): [number, number] {
+  const latRange: [number, number] = [-4.2, 1.2];
+  const lngRange: [number, number] = [-81.0, -75.5];
+  const lat = latRange[0] + hashStringToUnit(`${key}_lat`) * (latRange[1] - latRange[0]);
+  const lng = lngRange[0] + hashStringToUnit(`${key}_lng`) * (lngRange[1] - lngRange[0]);
+  return [lat, lng];
+}
+
+// Solo consulta la tabla local de ciudades/hubs conocidos, sin red y sin fallback.
+function getKnownCityInfo(key: string): { name: string; coords: [number, number] } | null {
   if (!key) return null;
   const clean = key.split('_')[0].trim();
   let info = ECUADOR_CITIES[clean] || ECUADOR_CITIES[key];
-  
+
   if (!info) {
     const searchName = clean.toLowerCase();
     const found = Object.values(ECUADOR_CITIES).find(v => v.name.toLowerCase() === searchName);
@@ -249,156 +340,215 @@ function getCityInfo(key: string) {
     const num = key.replace(/\D/g, "");
     info = ECUADOR_CITIES[`Node ${num}`] || ECUADOR_CITIES[`Node_${num}`];
   }
+
   return info || null;
 }
 
-function LogisticsMap({ dark, routes, defaultCenter = [-1.8312, -78.1834], defaultZoom = 7 }: { dark: boolean; routes?: Array<{ from: string; to: string; units: number; active: boolean }>; defaultCenter?: [number, number]; defaultZoom?: number }) {
+// Resuelve coordenadas para un conjunto de nombres de nodo: primero la tabla
+// conocida (instantáneo), luego Mapbox (nombre real, cacheado), y como último
+// recurso una coordenada estable por hash para que el mapa nunca se quede sin
+// puntos aunque Mapbox no encuentre el lugar.
+async function resolveNodeCoords(keys: string[]): Promise<Map<string, { name: string; coords: [number, number] }>> {
+  const result = new Map<string, { name: string; coords: [number, number] }>();
+  for (const key of keys) {
+    const known = getKnownCityInfo(key);
+    if (known) {
+      result.set(key, known);
+      continue;
+    }
+    const geo = await geocodePlaceMapbox(key);
+    result.set(key, geo ? { name: key, coords: geo } : { name: key, coords: hashToEcuadorCoords(key) });
+  }
+  return result;
+}
+
+function LogisticsMap({ dark, routes, defaultCenter = ECUADOR_DEFAULT_CENTER, defaultZoom = 7, onRouteDistance }: { dark: boolean; routes?: Array<{ from: string; to: string; units: number; active: boolean }>; defaultCenter?: [number, number]; defaultZoom?: number; onRouteDistance?: (key: string, distanceKm: number) => void }) {
   const mapRef = useRef<HTMLDivElement>(null);
+  // Se guarda en un ref para poder llamar siempre a la versión más reciente
+  // del callback desde dentro del efecto del mapa, sin tener que incluirlo en
+  // las dependencias (eso forzaría recrear el mapa completo en cada render).
+  const onRouteDistanceRef = useRef(onRouteDistance);
+  useEffect(() => { onRouteDistanceRef.current = onRouteDistance; }, [onRouteDistance]);
 
   useEffect(() => {
     let isMapMounted = true;
     if (!mapRef.current) return;
-    const L = (window as any).L;
-    if (!L) {
-      console.warn("Leaflet library not loaded yet.");
+    const mapboxgl = (window as any).mapboxgl;
+    if (!mapboxgl) {
+      console.warn("Mapbox GL library not loaded yet.");
+      return;
+    }
+    if (!MAPBOX_TOKEN) {
+      console.warn("VITE_MAPBOX_TOKEN no está configurado; el mapa no puede inicializarse.");
       return;
     }
 
-    // Initialize map focused strictly on Ecuador, locking user zoom and bounds.
-    const map = L.map(mapRef.current, {
-      center: defaultCenter,
+    // Initialize map focused strictly on Ecuador, locking user zoom y bounds.
+    const map = new mapboxgl.Map({
+      container: mapRef.current,
+      style: dark ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/streets-v12",
+      center: toLngLat(defaultCenter),
       zoom: defaultZoom,
       minZoom: 6,
-      maxZoom: 11,
-      maxBounds: [[-5.2, -82.0], [2.2, -74.5]], // Bounding box limits for Ecuador
-      zoomControl: true,
+      maxZoom: 18,
+      maxBounds: [[-82.0, -5.2], [-74.5, 2.2]], // esquinas [lng,lat] SO/NE de Ecuador
     });
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-left");
 
-    const tileUrl = dark 
-      ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" 
-      : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+    // Mapbox GL solo lee el tamaño del contenedor una vez al crear el mapa; si
+    // el layout todavía se está acomodando (ej. animación de entrada de
+    // Framer Motion, sidebar colapsando), el canvas queda con una matriz de
+    // proyección basada en un tamaño viejo y los marcadores/rutas se dibujan
+    // desplazados. Un ResizeObserver mantiene el mapa sincronizado con el
+    // tamaño real del contenedor en todo momento.
+    const resizeObserver = new ResizeObserver(() => map.resize());
+    resizeObserver.observe(mapRef.current);
 
-    const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+    const markers: any[] = [];
+    let routeSeq = 0;
 
-    L.tileLayer(tileUrl, { attribution }).addTo(map);
-
-    if (routes && routes.length > 0) {
-      const markersAdded = new Set<string>();
-
-      routes.forEach(r => {
-        const fromInfo = getCityInfo(r.from);
-        const toInfo = getCityInfo(r.to);
-
-        if (fromInfo && toInfo) {
-          // Source marker
-          if (!markersAdded.has(r.from)) {
-            L.marker(fromInfo.coords, {
-              icon: L.divIcon({
-                className: 'custom-div-icon',
-                html: `<div style="background-color: ${dark ? '#3B82F6' : '#1345A8'}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.3);"></div>`,
-                iconSize: [12, 12],
-                iconAnchor: [6, 6]
-              })
-            }).addTo(map).bindPopup(`<b>${fromInfo.name}</b>`);
-            markersAdded.add(r.from);
-          }
-
-          // Target marker
-          if (!markersAdded.has(r.to)) {
-            L.marker(toInfo.coords, {
-              icon: L.divIcon({
-                className: 'custom-div-icon',
-                html: `<div style="background-color: ${r.active ? '#10B981' : '#EF4444'}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.3);"></div>`,
-                iconSize: [12, 12],
-                iconAnchor: [6, 6]
-              })
-            }).addTo(map).bindPopup(`<b>${toInfo.name}</b>`);
-            markersAdded.add(r.to);
-          }
-
-          // Render direct path synchronously first (as fallback)
-          const color = r.active ? (dark ? "#10B981" : "#059669") : (dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)");
-          const weight = r.active ? 3 : 1.5;
-          const poly = L.polyline([fromInfo.coords, toInfo.coords], {
-            color: color,
-            weight: weight,
-            dashArray: r.active ? undefined : '5, 5',
-            opacity: r.active ? 0.9 : 0.4
-          }).addTo(map);
-
-          if (r.active) {
-            poly.bindPopup(`<b>Ruta Activa (Directa):</b> ${fromInfo.name} &rarr; ${toInfo.name}<br/><b>Flujo:</b> ${r.units} unidades`);
-          }
-
-          // Fetch real driving route from OSRM asynchronously
-          fetch(`https://router.project-osrm.org/route/v1/driving/${fromInfo.coords[1]},${fromInfo.coords[0]};${toInfo.coords[1]},${toInfo.coords[0]}?overview=full&geometries=geojson`)
-            .then(res => res.json())
-            .then(data => {
-              if (!isMapMounted) return;
-              if (data.code === "Ok" && data.routes && data.routes[0]) {
-                const coords = data.routes[0].geometry.coordinates;
-                const latlngs = coords.map((c: [number, number]) => [c[1], c[0]]);
-                poly.setLatLngs(latlngs);
-                if (r.active) {
-                  poly.bindPopup(`<b>Ruta Activa (Vial):</b> ${fromInfo.name} &rarr; ${toInfo.name}<br/><b>Flujo:</b> ${r.units} unidades`);
-                }
-              }
-            })
-            .catch(err => {
-              console.warn("OSRM routing failed, keeping straight path:", err);
-            });
-        }
-      });
-    } else {
-      // Overview mode
-      HUBS.forEach(hub => {
-        const info = getCityInfo(hub.id);
-        if (info) {
-          L.marker(info.coords, {
-            icon: L.divIcon({
-              className: 'custom-div-icon',
-              html: `<div style="background-color: ${dark ? '#0EA5E9' : '#1345A8'}; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.3)"></div>`,
-              iconSize: [10, 10],
-              iconAnchor: [5, 5]
-            })
-          }).addTo(map).bindPopup(`<b>Hub:</b> ${info.name}`);
-        }
-      });
-
-      ROUTES.forEach(r => {
-        const fromInfo = getCityInfo(r.from);
-        const toInfo = getCityInfo(r.to);
-        if (fromInfo && toInfo) {
-          const color = r.active ? (dark ? "#0EA5E9" : "#1345A8") : (dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)");
-          
-          // Render direct path synchronously first (as fallback)
-          const poly = L.polyline([fromInfo.coords, toInfo.coords], {
-            color,
-            weight: r.active ? 2 : 1,
-            dashArray: r.active ? undefined : '3, 3',
-            opacity: r.active ? 0.8 : 0.4
-          }).addTo(map);
-
-          // Fetch real driving route from OSRM asynchronously
-          fetch(`https://router.project-osrm.org/route/v1/driving/${fromInfo.coords[1]},${fromInfo.coords[0]};${toInfo.coords[1]},${toInfo.coords[0]}?overview=full&geometries=geojson`)
-            .then(res => res.json())
-            .then(data => {
-              if (!isMapMounted) return;
-              if (data.code === "Ok" && data.routes && data.routes[0]) {
-                const coords = data.routes[0].geometry.coordinates;
-                const latlngs = coords.map((c: [number, number]) => [c[1], c[0]]);
-                poly.setLatLngs(latlngs);
-              }
-            })
-            .catch(err => {
-              console.warn("OSRM routing failed, keeping straight path:", err);
-            });
-        }
-      });
+    function addMarker(coords: [number, number], color: string, size: number, popupHtml: string) {
+      const el = document.createElement("div");
+      el.style.width = `${size}px`;
+      el.style.height = `${size}px`;
+      el.style.borderRadius = "50%";
+      el.style.background = color;
+      el.style.border = "2px solid white";
+      el.style.boxShadow = "0 0 8px rgba(0,0,0,0.3)";
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat(toLngLat(coords))
+        .setPopup(new mapboxgl.Popup({ offset: size + 4 }).setHTML(popupHtml))
+        .addTo(map);
+      markers.push(marker);
     }
+
+    // Dibuja la línea recta (fallback inmediato) y la deja lista para que
+    // updateRouteLine() la reemplace con la geometría vial real de Mapbox
+    // Directions una vez que llegue la respuesta.
+    function addRouteLine(id: string, fromCoords: [number, number], toCoords: [number, number], color: string, weight: number, opacity: number, dashed: boolean, popupState?: { html: string }) {
+      map.addSource(id, {
+        type: "geojson",
+        data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [toLngLat(fromCoords), toLngLat(toCoords)] } }
+      });
+      map.addLayer({
+        id,
+        type: "line",
+        source: id,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": color,
+          "line-width": weight,
+          "line-opacity": opacity,
+          ...(dashed ? { "line-dasharray": [2, 2] } : {})
+        }
+      });
+      if (popupState) {
+        map.on("mouseenter", id, () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", id, () => { map.getCanvas().style.cursor = ""; });
+        map.on("click", id, (e: any) => {
+          new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat).setHTML(popupState.html).addTo(map);
+        });
+      }
+    }
+
+    function updateRouteLine(id: string, lngLatCoords: [number, number][]) {
+      const source = map.getSource(id);
+      if (source) {
+        source.setData({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: lngLatCoords } });
+      }
+    }
+
+    map.on("load", () => {
+      if (!isMapMounted) return;
+
+      if (routes && routes.length > 0) {
+        // Resuelve coordenadas reales (tabla conocida -> Mapbox -> hash) para
+        // todos los nodos únicos ANTES de dibujar, así los marcadores y rutas
+        // usan de una vez la ubicación real cuando Mapbox la encuentra.
+        const uniqueKeys = Array.from(new Set(routes.flatMap(r => [r.from, r.to])));
+        resolveNodeCoords(uniqueKeys).then(coordsByKey => {
+          if (!isMapMounted) return;
+          const markersAdded = new Set<string>();
+
+          routes.forEach(r => {
+            const fromInfo = coordsByKey.get(r.from);
+            const toInfo = coordsByKey.get(r.to);
+            if (!fromInfo || !toInfo) return;
+
+            if (!markersAdded.has(r.from)) {
+              addMarker(fromInfo.coords, dark ? "#3B82F6" : "#1345A8", 12, `<b>${fromInfo.name}</b>`);
+              markersAdded.add(r.from);
+            }
+            if (!markersAdded.has(r.to)) {
+              addMarker(toInfo.coords, r.active ? "#10B981" : "#EF4444", 12, `<b>${toInfo.name}</b>`);
+              markersAdded.add(r.to);
+            }
+
+            const color = r.active ? (dark ? "#10B981" : "#059669") : (dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)");
+            const weight = r.active ? 3 : 1.5;
+            const lineId = `route-${routeSeq++}`;
+            const popupState = r.active
+              ? { html: `<b>Ruta Activa (Directa):</b> ${fromInfo.name} &rarr; ${toInfo.name}<br/><b>Flujo:</b> ${r.units} unidades` }
+              : undefined;
+            addRouteLine(lineId, fromInfo.coords, toInfo.coords, color, weight, r.active ? 0.9 : 0.4, !r.active, popupState);
+
+            // Fetch real driving route from Mapbox Directions asynchronously
+            fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${fromInfo.coords[1]},${fromInfo.coords[0]};${toInfo.coords[1]},${toInfo.coords[0]}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`)
+              .then(res => res.json())
+              .then(data => {
+                if (!isMapMounted) return;
+                if (data.code === "Ok" && data.routes && data.routes[0]) {
+                  updateRouteLine(lineId, data.routes[0].geometry.coordinates);
+                  const distanceKm = data.routes[0].distance / 1000;
+                  onRouteDistanceRef.current?.(`${r.from}|${r.to}`, distanceKm);
+                  if (popupState) {
+                    popupState.html = `<b>Ruta Activa (Vial):</b> ${fromInfo.name} &rarr; ${toInfo.name}<br/><b>Flujo:</b> ${r.units} unidades<br/><b>Distancia:</b> ${distanceKm.toFixed(1)} km`;
+                  }
+                }
+              })
+              .catch(err => {
+                console.warn("Mapbox Directions falló, se mantiene la línea recta:", err);
+              });
+          });
+        });
+      } else {
+        // Overview mode
+        HUBS.forEach(hub => {
+          const info = getKnownCityInfo(hub.id);
+          if (info) {
+            addMarker(info.coords, dark ? "#0EA5E9" : "#1345A8", 10, `<b>Hub:</b> ${info.name}`);
+          }
+        });
+
+        ROUTES.forEach(r => {
+          const fromInfo = getKnownCityInfo(r.from);
+          const toInfo = getKnownCityInfo(r.to);
+          if (!fromInfo || !toInfo) return;
+
+          const color = r.active ? (dark ? "#0EA5E9" : "#1345A8") : (dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)");
+          const lineId = `overview-route-${routeSeq++}`;
+          addRouteLine(lineId, fromInfo.coords, toInfo.coords, color, r.active ? 2 : 1, r.active ? 0.8 : 0.4, !r.active);
+
+          // Fetch real driving route from Mapbox Directions asynchronously
+          fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${fromInfo.coords[1]},${fromInfo.coords[0]};${toInfo.coords[1]},${toInfo.coords[0]}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`)
+            .then(res => res.json())
+            .then(data => {
+              if (!isMapMounted) return;
+              if (data.code === "Ok" && data.routes && data.routes[0]) {
+                updateRouteLine(lineId, data.routes[0].geometry.coordinates);
+              }
+            })
+            .catch(err => {
+              console.warn("Mapbox Directions falló, se mantiene la línea recta:", err);
+            });
+        });
+      }
+    });
 
     return () => {
       isMapMounted = false;
+      resizeObserver.disconnect();
+      markers.forEach(m => m.remove());
       map.remove();
     };
   }, [dark, routes, defaultCenter, defaultZoom]);
@@ -494,7 +644,7 @@ function OverviewView({ dark, dbModels }: { dark: boolean; dbModels: any[] }) {
       <Card>
         <SectionHeader title="Mapa de Referencia" sub="Vista geográfica de apoyo para los módulos de Transporte y Redes" />
         <div className="p-4">
-          <LogisticsMap dark={dark} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
+          <LogisticsMap dark={dark} defaultCenter={ECUADOR_DEFAULT_CENTER} defaultZoom={7} />
         </div>
       </Card>
 
@@ -682,10 +832,19 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
   const activeSolution = modelData?.solutions?.[0];
   const problem = modelData?.data;
 
+  // Distancia vial real (Km) por ruta, reportada por LogisticsMap a medida que
+  // Mapbox Directions va resolviendo cada tramo. Se indexa por "origen|destino".
+  const [routeDistances, setRouteDistances] = useState<Record<string, number>>({});
+  const handleRouteDistance = useCallback((key: string, distanceKm: number) => {
+    setRouteDistances(prev => (prev[key] === distanceKm ? prev : { ...prev, [key]: distanceKm }));
+  }, []);
+
   const maxUnits = activeSolution && Array.isArray(activeSolution.variables)
     ? Math.max(...activeSolution.variables.map((v: any) => v.units), 1) : 1;
 
   const displayPlan = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
+    origin: v.origin,
+    destination: v.destination,
     route: `${v.origin.replace(/_/g, ' ')} → ${v.destination.replace(/_/g, ' ')}`,
     units: v.units,
     cost: v.cost,
@@ -695,19 +854,25 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
 
   const totalCost = activeSolution?.objectiveValue ?? 0;
 
-  const mapRoutes = activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
-    from: v.origin,
-    to: v.destination,
-    units: v.units,
-    active: v.units > 0
-  })) : [];
+  // Memoizado: si no, cada render de TransportView (ej. al llegar una nueva
+  // distancia por onRouteDistance) crearía un array nuevo y el useEffect de
+  // LogisticsMap, que depende de la identidad de `routes`, reiniciaría el
+  // mapa entero en bucle antes de que las distancias llegaran a asentarse.
+  const mapRoutes = useMemo(() => (
+    activeSolution && Array.isArray(activeSolution.variables) ? activeSolution.variables.map((v: any) => ({
+      from: v.origin,
+      to: v.destination,
+      units: v.units,
+      active: v.units > 0
+    })) : []
+  ), [activeSolution]);
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
         <SectionHeader title="Mapa Real de Rutas de Transporte" sub="Orígenes y destinos óptimos calculados visualizados en mapa real" />
         <div className="p-4">
-          <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
+          <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={ECUADOR_DEFAULT_CENTER} defaultZoom={7} onRouteDistance={handleRouteDistance} />
         </div>
       </Card>
 
@@ -760,16 +925,19 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border">
-                    {["Ruta", "Unidades", "Costo", "Utilización", "Estado"].map(h => (
+                    {["Ruta", "Unidades", "Distancia", "Costo", "Utilización", "Estado"].map(h => (
                       <th key={h} className="text-left px-4 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {displayPlan.map((r: any) => (
+                  {displayPlan.map((r: any) => {
+                    const distanceKm = routeDistances[`${r.origin}|${r.destination}`];
+                    return (
                     <tr key={r.route} className="hover:bg-secondary/30 transition-colors">
                       <td className="px-4 py-3 font-mono text-[11px] text-foreground">{r.route}</td>
                       <td className="px-4 py-3 font-mono text-foreground">{r.units}</td>
+                      <td className="px-4 py-3 font-mono text-muted-foreground">{distanceKm != null ? `${distanceKm.toFixed(1)} km` : "—"}</td>
                       <td className="px-4 py-3 font-mono font-semibold text-primary">${r.cost.toLocaleString()}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -783,7 +951,8 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
                         <Badge label={r.status} variant="success" />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -792,6 +961,82 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
           <Card><EmptyState dark={dark} title="Aún no se ha resuelto" sub='Dale clic a "Resolver" para calcular el plan óptimo de transporte.' /></Card>
         )}
       </div>
+
+      {activeSolution && (Array.isArray(activeSolution.supply_duals) || Array.isArray(activeSolution.opportunity_costs)) && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Card>
+            <SectionHeader title="Precios sombra" sub="Costo marginal de tener 1 unidad más de oferta o demanda" />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Nodo", "Tipo", "Holgura", "Precio Sombra"].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {[
+                    ...(activeSolution.supply_duals ?? []).map((r: any) => ({ ...r, tipo: "Oferta" })),
+                    ...(activeSolution.demand_duals ?? []).map((r: any) => ({ ...r, tipo: "Demanda" })),
+                  ].map((r: any, i: number) => (
+                    <tr key={`${r.tipo}-${r.name}-${i}`} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-5 py-3 text-foreground">{r.name}</td>
+                      <td className="px-5 py-3 font-mono text-muted-foreground">{r.tipo}</td>
+                      <td className={`px-5 py-3 font-mono ${r.slack === 0 ? "text-amber-500 font-semibold" : "text-emerald-600"}`}>{r.slack.toFixed(2)}</td>
+                      <td className="px-5 py-3 font-mono font-semibold text-primary">{r.shadow_price.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader title="Rutas principales vs. alternativas" sub="Cuáles usar (ordenadas por volumen) y cuánto costaría forzar las demás" />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Ruta", "Estado", "Unidades", "Distancia", "Costo de Oportunidad"].map(h => (
+                      <th key={h} className="text-left px-5 py-2.5 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {[
+                    ...(activeSolution.allocations ?? []).map((a: any) => ({ origin: a.origin, destination: a.destination, units: a.units, opportunity_cost: 0, recommended: true })),
+                    ...(activeSolution.opportunity_costs ?? []).map((r: any) => ({ ...r, units: null, recommended: false })),
+                  ]
+                    .sort((a, b) => {
+                      if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+                      return a.recommended ? (b.units ?? 0) - (a.units ?? 0) : a.opportunity_cost - b.opportunity_cost;
+                    })
+                    .map((r: any, i: number) => {
+                      const distanceKm = routeDistances[`${r.origin}|${r.destination}`];
+                      return (
+                      <tr key={`${r.origin}-${r.destination}-${i}`} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-5 py-3 font-mono text-[11px] text-foreground">{r.origin.replace(/_/g, ' ')} → {r.destination.replace(/_/g, ' ')}</td>
+                        <td className="px-5 py-3">
+                          <Badge label={r.recommended ? "PRINCIPAL" : "NO RECOMENDADA"} variant={r.recommended ? "success" : "default"} />
+                        </td>
+                        <td className="px-5 py-3 font-mono text-muted-foreground">{r.units != null ? r.units.toLocaleString() : "—"}</td>
+                        <td className="px-5 py-3 font-mono text-muted-foreground">{distanceKm != null ? `${distanceKm.toFixed(1)} km` : "—"}</td>
+                        <td className={`px-5 py-3 font-mono font-semibold ${r.recommended ? "text-emerald-600" : "text-amber-500"}`}>
+                          {r.recommended ? "0,000" : `+${r.opportunity_cost.toFixed(3)}`}
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  {(activeSolution.allocations ?? []).length === 0 && (activeSolution.opportunity_costs ?? []).length === 0 && (
+                    <tr><td colSpan={5} className="px-5 py-4 text-center text-muted-foreground font-mono text-[11px]">Sin datos de rutas todavía.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {Array.isArray(activeSolution?.comparisons) && activeSolution.comparisons.length > 0 && (
         <Card>
@@ -867,7 +1112,7 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
       <Card>
         <SectionHeader title="Mapa Real de la Red" sub="Visualización de nodos y arcos con el resultado calculado" />
         <div className="p-4">
-          <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={[-1.8312, -78.1834]} defaultZoom={7} />
+          <LogisticsMap dark={dark} routes={mapRoutes} defaultCenter={ECUADOR_DEFAULT_CENTER} defaultZoom={7} />
         </div>
       </Card>
 
@@ -1288,10 +1533,18 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     }
 
     try {
+      // Si ya hay un modelo cargado en este módulo, se lo pasamos al Resolutor como
+      // contexto: así puede detectar ediciones incrementales ("agrega también este
+      // origen por $80") y devolver el mismo modelo con el cambio aplicado, en vez
+      // de interpretar cada mensaje como un problema nuevo desde cero.
+      const currentModel = activeModelData?.data
+        ? { moduleType: activeModule, data: activeModelData.data }
+        : undefined;
+
       const interpretRes = await fetch("http://localhost:4000/api/tutor/interpret", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userMessage: text })
+        body: JSON.stringify({ userMessage: text, currentModel })
       });
       const interpretData = await interpretRes.json();
 
@@ -1407,9 +1660,19 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
                 {MODULES.find(m => m.id === activeModule)?.shortLabel} · ACTIVE
               </p>
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-mono" style={{ color: dark ? "#6B7280" : "#9CA3AF" }}>GPT-4o</span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (window.confirm("¿Estás seguro de que quieres limpiar el historial de chat de este módulo?")) {
+                    setMessages([{ role: "assistant", text: MODULE_INTROS[activeModule] }]);
+                  }
+                }}
+                className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors flex items-center justify-center"
+                title="Limpiar historial de chat"
+                style={{ color: dark ? "#94A3B8" : "#64748B" }}
+              >
+                <Trash2 size={13} />
+              </button>
             </div>
           </div>
 
@@ -1909,15 +2172,6 @@ export default function App() {
               <span>{dark ? "Claro" : "Oscuro"}</span>
             </button>
 
-            <button className="relative p-1.5 rounded transition-colors" style={{ color: textMuted }}>
-              <Bell size={16} />
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
-            </button>
-
-            <button className="p-1.5 rounded transition-colors" style={{ color: textMuted }}>
-              <Settings size={16} />
-            </button>
-
             {/* Avatar */}
             <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold text-white shrink-0"
               style={{ background: accentBlue }}>
@@ -2034,23 +2288,6 @@ export default function App() {
       <style>{`
         * { scrollbar-width: none; }
         *::-webkit-scrollbar { display: none; }
-        .leaflet-container, 
-        .leaflet-container *, 
-        .leaflet-grab, 
-        .leaflet-grabbing, 
-        .leaflet-pane, 
-        .leaflet-tile-pane,
-        .leaflet-map-pane {
-          cursor: default !important;
-        }
-        .custom-div-icon, 
-        .leaflet-marker-icon, 
-        .leaflet-interactive, 
-        .leaflet-control-zoom-in, 
-        .leaflet-control-zoom-out, 
-        .leaflet-control-zoom a {
-          cursor: pointer !important;
-        }
       `}</style>
     </div>
   );

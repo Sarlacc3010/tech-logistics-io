@@ -11,6 +11,7 @@ services:
       - PORT=4000
       - SOLVER_SERVICE_URL=http://solver-service:8000/api/v1
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_password}@postgres:5432/${POSTGRES_DB:-tech_logistics}?schema=public
       - MONGODB_URI=mongodb://${MONGO_INITDB_ROOT_USERNAME:-mongo_admin}:${MONGO_INITDB_ROOT_PASSWORD:-mongo_password}@mongodb:27017/${MONGO_DB:-tech_logistics}?authSource=admin
     depends_on:
@@ -22,6 +23,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}
     ports:
       - "5173:80"
     depends_on:
