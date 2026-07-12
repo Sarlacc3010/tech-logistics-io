@@ -22,6 +22,11 @@ import { DynamicEditor } from "../components/DynamicEditor";
 import { InventoriesEditor } from "../components/InventoriesEditor";
 import { AlgorithmSteps } from "../components/AlgorithmSteps";
 
+// Se arma a partir del host con el que se abrió la página (no un "localhost"
+// fijo): así funciona igual si se accede desde la misma PC o desde otra en la
+// red local usando la IP del servidor (ej. http://192.168.1.5:5173).
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:4000`;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type ModuleId = "overview" | "lp" | "transport" | "networks" | "ip" | "dp" | "inventories";
@@ -579,7 +584,7 @@ function OverviewView({ dark, dbModels }: { dark: boolean; dbModels: any[] }) {
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:4000/api/audit/logs")
+    fetch(`${API_BASE_URL}/api/audit/logs`)
       .then(r => r.json())
       .then(d => { if (d.status === "success" && Array.isArray(d.data)) setRecentLogs(d.data.slice(-8).reverse()); })
       .catch(() => {});
@@ -1496,7 +1501,7 @@ function HistorialPanel({ dark, dbModels, onClose }: { dark: boolean; dbModels: 
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <a
-                          href={`http://localhost:4000/api/audit/annex?modelId=${m.id}&format=pdf`}
+                          href={`${API_BASE_URL}/api/audit/annex?modelId=${m.id}&format=pdf`}
                           target="_blank"
                           rel="noopener noreferrer"
                           title="Descargar Anexo IA de este ejercicio (PDF)"
@@ -1506,7 +1511,7 @@ function HistorialPanel({ dark, dbModels, onClose }: { dark: boolean; dbModels: 
                           <Download size={11} /> PDF
                         </a>
                         <a
-                          href={`http://localhost:4000/api/audit/annex?modelId=${m.id}&format=csv`}
+                          href={`${API_BASE_URL}/api/audit/annex?modelId=${m.id}&format=csv`}
                           target="_blank"
                           rel="noopener noreferrer"
                           title="Descargar Anexo IA de este ejercicio (CSV)"
@@ -1571,7 +1576,7 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     formData.append("file", file);
     
     try {
-      const response = await fetch("http://localhost:4000/api/tutor/upload", {
+      const response = await fetch(`${API_BASE_URL}/api/tutor/upload`, {
         method: "POST",
         body: formData
       });
@@ -1613,7 +1618,7 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     const solution = activeModelData?.solutions?.[0] || {};
     const problemContext = `Active Module: ${activeModule}. Model configuration: ${JSON.stringify(activeModelData?.data || {})}`;
 
-    const response = await fetch("http://localhost:4000/api/tutor/ask", {
+    const response = await fetch(`${API_BASE_URL}/api/tutor/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1657,7 +1662,7 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
         ? { moduleType: activeModule, data: activeModelData.data }
         : undefined;
 
-      const interpretRes = await fetch("http://localhost:4000/api/tutor/interpret", {
+      const interpretRes = await fetch(`${API_BASE_URL}/api/tutor/interpret`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userMessage: text, currentModel, modelId: activeExerciseId || provisionalId })
@@ -1705,7 +1710,7 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
           // LLM #2: validador independiente, revisa el trabajo del LLM #1 antes de darlo por bueno.
           setTyping(true);
           try {
-            const validateRes = await fetch("http://localhost:4000/api/tutor/validate", {
+            const validateRes = await fetch(`${API_BASE_URL}/api/tutor/validate`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1742,7 +1747,7 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
         // Ya sea la primera pregunta tras detectar un problema nuevo, o una
         // respuesta de seguimiento dentro de la misma exploración socrática.
         try {
-          const response = await fetch("http://localhost:4000/api/tutor/socratic", {
+          const response = await fetch(`${API_BASE_URL}/api/tutor/socratic`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2100,7 +2105,7 @@ export default function App() {
 
   const fetchModels = async () => {
     try {
-      const res = await fetch("http://localhost:4000/api/models");
+      const res = await fetch(`${API_BASE_URL}/api/models`);
       const json = await res.json();
       if (json.status === "success" && Array.isArray(json.data)) {
         setDbModels(json.data);
@@ -2140,7 +2145,7 @@ export default function App() {
     setSolving(true);
     try {
       const parsedData = JSON.parse(jsonText);
-      const response = await fetch(`http://localhost:4000/api/models`, {
+      const response = await fetch(`${API_BASE_URL}/api/models`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: crypto.randomUUID(), type: activeModelData.type, data: parsedData, solve: true })
@@ -2173,7 +2178,7 @@ export default function App() {
 
     setSolving(true);
     try {
-      const response = await fetch(`http://localhost:4000/api/models`, {
+      const response = await fetch(`${API_BASE_URL}/api/models`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: crypto.randomUUID(), type: model.type, data: model.data, solve: true })
@@ -2203,7 +2208,7 @@ export default function App() {
     setJsonError(null);
     if (solve) setSolving(true);
     try {
-      const response = await fetch(`http://localhost:4000/api/models`, {
+      const response = await fetch(`${API_BASE_URL}/api/models`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: exerciseId, type: MODULE_TO_DB_TYPE[moduleType], data, solve })

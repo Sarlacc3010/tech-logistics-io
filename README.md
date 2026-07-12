@@ -294,6 +294,22 @@ Una vez levantado:
 | Backend API | http://localhost:4000 |
 | Solver API + Docs | http://localhost:8000/docs |
 
+### Acceder desde otra PC en la misma red
+
+El frontend detecta automáticamente el host con el que se abrió la página
+(`window.location.hostname`) para saber a qué backend llamar — no depende de
+`localhost` fijo. Para usarlo desde otra computadora en la misma red (WiFi/LAN):
+
+1. En la PC que corre Docker, averigua tu IP local: `ipconfig` (Windows, busca
+   la sección "Wi-Fi" o "Ethernet") o `ip addr` (Linux/macOS).
+2. Desde la otra PC, abre `http://<esa-ip>:5173` (ej. `http://192.168.1.5:5173`).
+3. Si no conecta, revisa que el Firewall de Windows permita conexiones
+   entrantes a Docker Desktop / Node.js en la red "Privada" — Docker suele
+   crear estas reglas automáticamente, pero conviene confirmarlo.
+
+El backend ya tiene CORS abierto (`origin: '*'`), así que no hace falta tocar
+nada del lado del servidor más allá del firewall.
+
 ### Comandos útiles
 
 ```bash
