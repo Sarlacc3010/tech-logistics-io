@@ -82,7 +82,7 @@ El sistema usa **dos proveedores de LLM genuinamente distintos**, cada uno con u
 
 **Modo socrático** 🎓 (interruptor en el chat): en lugar de resolver, el tutor hace 1–3 preguntas orientadoras por turno para que el estudiante identifique variables, función objetivo y restricciones por sí mismo — nunca revela el modelo completo ni el resultado, según lo exige la rúbrica.
 
-**Anexo de Interacción con IA**: toda llamada a los LLMs queda auditada (herramienta, fecha, objetivo, prompt, respuesta, validación). El botón *"Anexo IA"* de la barra superior lo descarga en **PDF** (formato ficha, listo para el informe) o **CSV** (tabla para Excel).
+**Historial y Anexo de Interacción con IA por ejercicio**: cada vez que se resuelve un problema — desde el chat (modo directo o socrático) o con el botón *"Resolver"*/*"Guardar y Resolver"* — queda guardado como un **ejercicio nuevo e independiente**; nunca se sobreescribe uno anterior del mismo módulo. Toda llamada a los LLMs queda auditada (herramienta, fecha, objetivo, prompt, respuesta, validación) y etiquetada con el ejercicio al que pertenece. El botón *"Historial"* de la barra superior abre la lista completa de ejercicios (resueltos y los que solo se exploraron en modo socrático) para elegir uno y descargar **su propio** Anexo IA en **PDF** (formato ficha, listo para el informe) o **CSV** (tabla para Excel).
 
 **RAG**: se pueden subir PDFs desde el chat (📎); el tutor incorpora su contenido como contexto en las respuestas.
 
@@ -169,7 +169,7 @@ Requiere un token público de Mapbox (`VITE_MAPBOX_TOKEN`, ver [Variables de ent
 1. **Por el chat (recomendado)** — abre el chat (🧠, abajo a la derecha), pega el enunciado del problema y envía. El tutor detecta el módulo, cambia de pestaña, resuelve, explica en el chat y valida con el segundo LLM. El dashboard muestra la solución y el detalle paso a paso.
 2. **Modo socrático** — activa el interruptor 🎓 del chat para que el tutor te guíe con preguntas en vez de resolver.
 3. **Manual** — en cualquier módulo, botón *"Editar Datos"* para llenar los parámetros con un **formulario real** (tablas de costos, variables, restricciones, selector de algoritmo en Redes, selector de tipo de cálculo en Inventarios) — no una caja de JSON crudo — luego *"Guardar y Resolver"* o *"Resolver"*.
-4. **Evidencias** — botón *"Anexo IA (PDF)"* en la barra superior para descargar el registro de interacciones para el informe.
+4. **Evidencias** — botón *"Historial"* en la barra superior: lista todos los ejercicios resueltos (o solo explorados en modo socrático) y descarga el Anexo IA de cada uno por separado, en PDF o CSV, para el informe.
 
 Cada módulo tiene URL propia (`/lp`, `/transport`, `/networks`, `/ip`, `/dp`, `/inventories`): se puede recargar, compartir el enlace o usar atrás/adelante del navegador.
 
@@ -196,20 +196,22 @@ Base: `http://localhost:4000/api`
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `GET` | `/models` | Modelos guardados con su última solución (PostgreSQL) |
-| `PUT` | `/models/:id` | Guarda parámetros **y resuelve** (persiste la solución) |
-| `POST` | `/lp/solve` | PL/PE — acepta `method`: `auto`/`simplex`/`dosfases`/`granm`/`none` |
+| `GET` | `/models` | Todos los ejercicios guardados (historial completo, no solo el último por módulo), con su solución más reciente (PostgreSQL) |
+| `POST` | `/models` | Crea un ejercicio **nuevo** — nunca sobreescribe uno anterior del mismo módulo. `{id?, type, data, solve = true}`; con `solve: false` se guarda sin resolver (modo socrático) |
+| `POST` | `/models/:id/solve` | Resuelve un ejercicio ya creado sin resolver (ej. tras explorarlo en modo socrático y luego pedir la solución) |
+| `POST` | `/lp/solve` | PL/PE — acepta `method`: `auto`/`simplex`/`dosfases`/`granm`/`none` (cálculo puntual, sin persistir) |
 | `POST` | `/transport/solve` | Transporte — acepta `initial_method`: `vogel`/`noroeste`/`costo_minimo`; devuelve además `supply_duals`, `demand_duals` y `opportunity_costs` (sensibilidad) |
 | `POST` | `/networks/solve` | Redes — `algorithm`: `shortest_path`/`max_flow`/`min_cost_flow`/`min_spanning_tree` |
 | `POST` | `/dynamic/solve` | PD — `problem_type`: `knapsack`/`lot_sizing` |
 | `POST` | `/inventories/solve` | Inventarios — `calc_type`: ver tabla de modelos |
-| `POST` | `/tutor/interpret` | LLM #1: enunciado en lenguaje natural → `{isNewProblem, moduleType, data}` |
+| `POST` | `/tutor/interpret` | LLM #1: enunciado en lenguaje natural → `{isNewProblem, moduleType, data}`. Acepta `modelId` opcional para etiquetar la interacción con un ejercicio |
 | `POST` | `/tutor/validate` | LLM #2: audita una solución → `{verdict, checks_realizados, issues}` |
 | `POST` | `/tutor/socratic` | Modo socrático: solo preguntas orientadoras |
 | `POST` | `/tutor/ask` | Narrador: explica la solución activa en lenguaje de negocio |
 | `POST` | `/tutor/upload` | Sube un PDF al índice RAG |
 | `GET` | `/audit/logs` | Log crudo de auditoría |
-| `GET` | `/audit/annex` | Anexo de Interacción con IA — `?format=csv` o `?format=pdf` |
+| `GET` | `/audit/annex` | Anexo de Interacción con IA de **todo** el historial — `?format=csv` o `?format=pdf` |
+| `GET` | `/audit/annex?modelId=X` | Anexo de Interacción con IA de **un solo ejercicio** (lo que usa el panel "Historial") |
 
 La documentación interactiva del Solver Service (FastAPI) está en `http://localhost:8000/docs`.
 
@@ -348,7 +350,7 @@ tech-logistics-io/
 
 ## Limitaciones conocidas
 
-- **Persistencia de pasos inconsistente entre flujos**: cuando el modelo se resuelve vía el chat (interpretación → `PUT /models/:id`), la respuesta completa del solver (`steps`, `comparisons`, sensibilidad) se persiste en PostgreSQL y sobrevive a un recargo de página. Cuando se resuelve con el botón *"Resolver"* directo (`POST /{módulo}/solve`), el resultado solo vive en el estado de React de esa sesión — se pierde al recargar, y hay que volver a resolver.
+- **El historial crece con cada clic en "Resolver"**: cada resolución (chat o botón manual) crea un ejercicio nuevo en PostgreSQL, aunque solo se haya cambiado un parámetro para probar — no hay una noción de "borrador" separada de "ejercicio guardado". No hay endpoint para eliminar ejercicios del historial todavía.
 - **Simplex educativo**: el tableau paso a paso aplica solo a variables continuas con cota inferior 0 y sin cota superior; los modelos enteros/acotados se resuelven con CBC (sin tableau) y la interfaz lo indica.
 - **Log de auditoría efímero**: `audit_logs.json` vive dentro del contenedor del backend sin volumen — se reinicia al reconstruir el contenedor. El historial de chat en MongoDB sí persiste.
 - **Flujo de costo mínimo**: usa NetworkX sin trazado de pasos (los otros 3 algoritmos de redes sí lo tienen).
@@ -358,7 +360,7 @@ tech-logistics-io/
 ## Documentación adicional
 
 - **[docs/Algoritmos_de_Resolucion.docx](docs/Algoritmos_de_Resolucion.docx)** — anexo técnico con la explicación formal de cada método (fórmulas, procedimientos, verificaciones) listo para el informe final.
-- **Anexo de Interacción con IA** — se genera en vivo desde la app (botón *"Anexo IA"*) con el formato que exige la rúbrica: herramienta, fecha, objetivo, prompt, respuesta y validación.
+- **Anexo de Interacción con IA** — se genera en vivo desde la app (botón *"Historial"*, uno por ejercicio o el conjunto completo vía `/api/audit/annex`) con el formato que exige la rúbrica: herramienta, fecha, objetivo, prompt, respuesta y validación.
 
 ---
 

@@ -9,13 +9,16 @@ import {
   solveDynamic,
   solveInventories
 } from '../controllers/solver.controller';
-import { getModels, updateModel } from '../controllers/database.controller';
+import { getModels, createModel, solveExistingModel } from '../controllers/database.controller';
 
 const router = Router();
 
-// Retrieve optimization models and solutions from PostgreSQL database
+// Retrieve optimization models and solutions from PostgreSQL database.
+// Cada resolución (chat o botón "Resolver") crea un ejercicio nuevo — no hay
+// endpoint de edición in-place: la historia de ejercicios nunca se sobreescribe.
 router.get('/models', getModels);
-router.put('/models/:id', updateModel);
+router.post('/models', createModel);
+router.post('/models/:id/solve', solveExistingModel);
 
 // Solver endpoints (with audit logging)
 router.post('/lp/solve', auditMiddleware('solver_lp'), solveLP);

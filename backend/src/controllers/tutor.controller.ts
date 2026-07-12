@@ -3,8 +3,14 @@ import { GroqService } from '../services/groq.service';
 import { GeminiService } from '../services/gemini.service';
 import { z } from 'zod';
 
+// modelId: id del ejercicio (OptimizationModel) al que pertenece esta
+// interacción — lo usa auditMiddleware (lee req.body directo, no el objeto
+// parseado por Zod) para poder generar después el Anexo IA de un ejercicio
+// puntual. Es opcional porque la primerísima llamada de interpretación de un
+// problema nuevo puede no tener todavía un ejercicio creado en Postgres.
 const InterpretRequestSchema = z.object({
   userMessage: z.string().min(1),
+  modelId: z.string().optional(),
   // Modelo activo del módulo actual, para que el LLM pueda detectar ediciones
   // incrementales ("agrega también este origen") en vez de tratar el mensaje
   // siempre como un problema nuevo desde cero.
@@ -18,12 +24,14 @@ const ValidateRequestSchema = z.object({
   originalMessage: z.string(),
   moduleType: z.string(),
   data: z.any(),
-  solvedSolution: z.any()
+  solvedSolution: z.any(),
+  modelId: z.string().optional()
 });
 
 const SocraticRequestSchema = z.object({
   activeModule: z.string(),
   userMessage: z.string(),
+  modelId: z.string().optional(),
   chatHistory: z.array(
     z.object({
       role: z.enum(['user', 'model', 'assistant']),
@@ -36,6 +44,7 @@ const TutorRequestSchema = z.object({
   problemContext: z.string(),
   mathematicalSolution: z.any().optional(),
   userMessage: z.string(),
+  modelId: z.string().optional(),
   chatHistory: z.array(
     z.object({
       role: z.enum(['user', 'model', 'assistant']),
