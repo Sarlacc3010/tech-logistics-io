@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "db:push": "prisma db push --accept-data-loss",
+    "db:seed": "ts-node-dev --transpile-only --exit-child src/seed.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

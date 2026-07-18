@@ -22,6 +22,12 @@ COPY . .
 # Build the TypeScript application
 RUN npm run build
 
+RUN chmod +x docker-entrypoint.sh
+
 EXPOSE 4000
 
-CMD ["npm", "start"]
+# El entrypoint sincroniza el esquema de Prisma con la base de datos antes de
+# arrancar el servidor (ver docker-entrypoint.sh) — sin esto, una base de
+# Postgres recien creada se queda sin tablas y el backend arranca "bien" pero
+# nada funciona.
+ENTRYPOINT ["./docker-entrypoint.sh"]

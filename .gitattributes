@@ -1,0 +1,5 @@
+# Los scripts de shell se ejecutan dentro de contenedores Linux: si Git los
+# convierte a CRLF al hacer checkout (comun en Windows con core.autocrlf=true),
+# /bin/sh falla al interpretarlos. Se fuerza LF sin importar la config local.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf

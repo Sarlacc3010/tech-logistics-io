@@ -4,6 +4,16 @@ import { SolverClientService } from './services/solver-client.service';
 const prisma = new PrismaClient();
 
 async function main() {
+  // Idempotente a propósito: se corre automaticamente en cada arranque del
+  // contenedor (ver docker-entrypoint.sh). Si ya hay un proyecto, la base no
+  // esta vacia -- probablemente tiene ejercicios reales guardados por algun
+  // companero -- asi que no se toca nada.
+  const existingProject = await prisma.project.findFirst();
+  if (existingProject) {
+    console.log(`ℹ️  Ya existen datos en la base (proyecto "${existingProject.name}") — se omite el seed.`);
+    return;
+  }
+
   console.log('🌱 Starting database seeding...');
 
   // 1. Clean existing records

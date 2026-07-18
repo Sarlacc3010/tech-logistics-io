@@ -295,6 +295,15 @@ docker-compose ps
 > aquí no hace falta GPU — esto por sí solo recorta el build en varios minutos
 > y varios GB.
 
+> 🗄️ **La base de datos se prepara sola en el primer arranque.** El backend
+> sincroniza el esquema de Prisma contra Postgres (`prisma db push`) y siembra
+> un ejercicio de ejemplo por módulo — no hace falta correr ningún comando
+> aparte. Es idempotente y seguro para reiniciar: si ya hay datos guardados
+> (un `Project` existente), el seed se salta solo y no borra nada. Antes de
+> este cambio, un Postgres recién creado se quedaba sin tablas y el backend
+> "arrancaba" pero cada petición fallaba — si a tu compañero el sistema no le
+> funcionó después de un build largo, era por esto.
+
 Una vez levantado:
 
 | Servicio | URL |
@@ -329,7 +338,15 @@ docker logs tech-logistics-io-backend-1 --tail 50 -f
 # (los servicios NO montan el código como volumen: hay que reconstruir la imagen)
 docker-compose build backend && docker-compose up -d --no-deps backend
 
-# Detener todo
+# Volver a sincronizar el esquema o resembrar datos a mano (normalmente no
+# hace falta, el backend ya lo hace solo al arrancar)
+docker compose exec backend npm run db:push
+docker compose exec backend npm run db:seed   # borra y vuelve a crear los 5 ejercicios de ejemplo
+
+# Empezar de cero por completo (borra los datos guardados en Postgres/Mongo)
+docker compose down -v
+
+# Detener todo (conserva los datos)
 docker-compose down
 ```
 
