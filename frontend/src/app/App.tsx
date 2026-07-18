@@ -22,6 +22,11 @@ import { DynamicEditor } from "../components/DynamicEditor";
 import { InventoriesEditor } from "../components/InventoriesEditor";
 import { AlgorithmSteps } from "../components/AlgorithmSteps";
 
+// Se arma a partir del host con el que se abrió la página (no un "localhost"
+// fijo): así funciona igual si se accede desde la misma PC o desde otra en la
+// red local usando la IP del servidor (ej. http://192.168.1.5:5173).
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:4000`;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type ModuleId = "overview" | "lp" | "transport" | "networks" | "ip" | "dp" | "inventories";
@@ -53,9 +58,6 @@ const MODULES: Module[] = [
 // lugar que busca el modelo activo.
 const MODULE_TO_DB_TYPE: Record<ModuleId, string> = {
   overview: "", lp: "LP", ip: "LP", transport: "TRANSPORT", networks: "NETWORKS", dp: "DYNAMIC", inventories: "INVENTORIES",
-};
-const MODULE_TO_SOLVER_PATH: Record<ModuleId, string> = {
-  overview: "", lp: "lp", ip: "lp", transport: "transport", networks: "networks", dp: "dynamic", inventories: "inventories",
 };
 
 // ─── Data ────────────────────────────────────────────────────────────────────
@@ -582,20 +584,23 @@ function OverviewView({ dark, dbModels }: { dark: boolean; dbModels: any[] }) {
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:4000/api/audit/logs")
+    fetch(`${API_BASE_URL}/api/audit/logs`)
       .then(r => r.json())
       .then(d => { if (d.status === "success" && Array.isArray(d.data)) setRecentLogs(d.data.slice(-8).reverse()); })
       .catch(() => {});
   }, []);
 
-  const resolvedCount = dbModels.filter(m => m.solutions?.length > 0).length;
-  const totalCount = dbModels.length;
-
+  // "Módulos resueltos" es sobre los 6 capítulos de IO, no sobre el total de
+  // ejercicios en el historial (dbModels ya puede tener varios por módulo).
+  // Para cada capítulo se mira el ejercicio más reciente (dbModels viene
+  // ordenado por fecha desde el backend).
   const moduleStatusCards = MODULES.filter(m => m.id !== "overview").map(m => {
     const model = dbModels.find(dm => dm.type.toUpperCase() === MODULE_TO_DB_TYPE[m.id]);
     const solution = model?.solutions?.[0];
     return { ...m, hasSolution: !!solution, objectiveValue: solution?.objectiveValue, status: solution?.status };
   });
+  const resolvedCount = moduleStatusCards.filter(m => m.hasSolution).length;
+  const totalCount = moduleStatusCards.length;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1406,7 +1411,129 @@ function loadStoredChatHistories(): Partial<Record<ModuleId, ChatMessage[]>> {
   }
 }
 
-function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { dark: boolean; activeModule: ModuleId; activeModelData?: any; onModelInterpreted: (moduleType: ModuleId, data: any) => Promise<any> }) {
+const DB_TYPE_LABELS: Record<string, string> = {
+  LP: "Programación Lineal / Entera",
+  TRANSPORT: "Transporte",
+  NETWORKS: "Redes",
+  DYNAMIC: "Programación Dinámica",
+  INVENTORIES: "Inventarios",
+};
+
+// Cada ejercicio resuelto (por chat o con "Resolver") queda como una entrada
+// propia del historial — nunca se sobreescribe uno anterior. Este panel deja
+// elegir, ejercicio por ejercicio, ver/descargar su propio Anexo de
+// Interacción con IA (PDF/CSV), incluyendo los que solo se exploraron en modo
+// socrático y nunca llegaron a resolverse numéricamente.
+function HistorialPanel({ dark, dbModels, onClose }: { dark: boolean; dbModels: any[]; onClose: () => void }) {
+  const bg = dark ? "#1C1F26" : "#FFFFFF";
+  const border = dark ? "rgba(255,255,255,0.09)" : "rgba(0,0,0,0.09)";
+  const textFg = dark ? "#E2E8F0" : "#0D1B2A";
+  const textMuted = dark ? "#6B7280" : "#9CA3AF";
+  const accent = dark ? "#3B82F6" : "#1345A8";
+
+  const sorted = [...dbModels].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        style={{ background: "rgba(0,0,0,0.5)" }}
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 16, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 16, scale: 0.97 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
+          className="w-full max-w-2xl rounded-xl overflow-hidden flex flex-col"
+          style={{
+            background: bg,
+            border: `1px solid ${border}`,
+            maxHeight: "80vh",
+            boxShadow: dark ? "0 20px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)" : "0 20px 60px rgba(0,0,0,0.15)"
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-5 py-4 flex items-center gap-2.5 border-b shrink-0" style={{ borderColor: border }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: accent }}>
+              <Clock size={16} className="text-white" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: textFg }}>Historial de Ejercicios</p>
+              <p className="text-[11px] font-mono" style={{ color: textMuted }}>
+                {sorted.length} ejercicio{sorted.length !== 1 ? "s" : ""} — elige uno para ver su Anexo IA
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="ml-auto p-1.5 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+              style={{ color: textMuted }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="overflow-y-auto flex-1">
+            {sorted.length === 0 ? (
+              <div className="p-10 text-center">
+                <p className="text-sm font-mono" style={{ color: textMuted }}>Todavía no hay ejercicios registrados.</p>
+              </div>
+            ) : (
+              <div className="divide-y" style={{ borderColor: border }}>
+                {sorted.map((m: any) => {
+                  const solved = Array.isArray(m.solutions) && m.solutions.length > 0;
+                  const objectiveValue = solved ? m.solutions[0]?.objectiveValue : null;
+                  return (
+                    <div key={m.id} className="px-5 py-3.5 flex items-center gap-3 hover:bg-secondary/20 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs font-semibold" style={{ color: textFg }}>{DB_TYPE_LABELS[m.type] || m.type}</p>
+                          <Badge label={solved ? "RESUELTO" : "SOLO EXPLORADO"} variant={solved ? "success" : "default"} />
+                        </div>
+                        <p className="text-[10px] font-mono mt-0.5" style={{ color: textMuted }}>
+                          {new Date(m.createdAt).toLocaleString('es-EC')}
+                          {objectiveValue != null ? ` · Z = ${Number(objectiveValue).toLocaleString()}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <a
+                          href={`${API_BASE_URL}/api/audit/annex?modelId=${m.id}&format=pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Descargar Anexo IA de este ejercicio (PDF)"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded text-[10px] font-mono transition-colors"
+                          style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: textMuted, border: `1px solid ${border}` }}
+                        >
+                          <Download size={11} /> PDF
+                        </a>
+                        <a
+                          href={`${API_BASE_URL}/api/audit/annex?modelId=${m.id}&format=csv`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Descargar Anexo IA de este ejercicio (CSV)"
+                          className="px-2.5 py-1.5 rounded text-[10px] font-mono transition-colors"
+                          style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: textMuted, border: `1px solid ${border}` }}
+                        >
+                          CSV
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { dark: boolean; activeModule: ModuleId; activeModelData?: any; onModelInterpreted: (moduleType: ModuleId, data: any, exerciseId: string, solve?: boolean) => Promise<any> }) {
   const [open, setOpen] = useState(false);
   // Historial persistido por módulo (localStorage), para no perder la conversación al cambiar
   // de módulo o recargar la página.
@@ -1422,6 +1549,14 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
   useEffect(() => {
     localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(allHistories));
   }, [allHistories]);
+
+  // Ejercicio (OptimizationModel) al que se están etiquetando las interacciones
+  // de IA de la conversación actual de cada módulo — así el Anexo IA se puede
+  // filtrar por ejercicio individual desde "Historial". Solo vive en memoria:
+  // no hace falta persistirlo, cada ejercicio ya queda guardado en la base.
+  const [activeExerciseIds, setActiveExerciseIds] = useState<Partial<Record<ModuleId, string>>>({});
+  const activeExerciseId = activeExerciseIds[activeModule];
+  const setActiveExerciseId = (id: string) => setActiveExerciseIds(prev => ({ ...prev, [activeModule]: id }));
 
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
@@ -1441,7 +1576,7 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     formData.append("file", file);
     
     try {
-      const response = await fetch("http://localhost:4000/api/tutor/upload", {
+      const response = await fetch(`${API_BASE_URL}/api/tutor/upload`, {
         method: "POST",
         body: formData
       });
@@ -1479,17 +1614,18 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     networks: "Redes", dp: "Programación Dinámica", inventories: "Inventarios",
   };
 
-  const askAboutActiveModel = async (text: string, historyBeforeThis: { role: "user" | "assistant"; text: string }[]) => {
+  const askAboutActiveModel = async (text: string, historyBeforeThis: { role: "user" | "assistant"; text: string }[], modelId?: string) => {
     const solution = activeModelData?.solutions?.[0] || {};
     const problemContext = `Active Module: ${activeModule}. Model configuration: ${JSON.stringify(activeModelData?.data || {})}`;
 
-    const response = await fetch("http://localhost:4000/api/tutor/ask", {
+    const response = await fetch(`${API_BASE_URL}/api/tutor/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         problemContext,
         mathematicalSolution: solution,
         userMessage: text,
+        modelId,
         chatHistory: historyBeforeThis.map(m => ({
           role: m.role === "assistant" ? "model" : "user",
           text: m.text
@@ -1499,10 +1635,11 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     return response.json();
   };
 
-  // Un solo botón que hace todo: interpreta el mensaje, y si es un problema nuevo, cambia de
-  // módulo, guarda y resuelve automáticamente, y narra el resultado en el chat. Si es una
-  // pregunta de seguimiento sobre el modelo ya activo, responde como el tutor de siempre.
-  // En modo socrático, en cambio, nunca resuelve directo: solo hace preguntas orientadoras.
+  // Un solo botón que hace todo: interpreta el mensaje y, si es un problema nuevo, lo guarda
+  // como un ejercicio propio del historial (nunca sobreescribe uno anterior). En modo directo
+  // lo resuelve de una vez y narra el resultado; en modo socrático lo guarda SIN resolver y
+  // sigue con preguntas orientadoras — la interpretación es silenciosa, nunca revela la solución.
+  // Las preguntas de seguimiento sobre un modelo ya activo responden como el tutor de siempre.
   const send = async () => {
     const text = input.trim();
     if (!text) return;
@@ -1511,28 +1648,12 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     setInput("");
     setTyping(true);
 
-    if (socraticMode) {
-      try {
-        const response = await fetch("http://localhost:4000/api/tutor/socratic", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            activeModule,
-            userMessage: text,
-            chatHistory: historyBeforeThis.map(m => ({ role: m.role === "assistant" ? "model" : "user", text: m.text }))
-          })
-        });
-        const resData = await response.json();
-        setTyping(false);
-        setMessages(m => [...m, { role: "assistant", text: resData.status === "success" ? resData.reply : "No pude generar una pregunta orientadora en este momento." }]);
-      } catch (error) {
-        setTyping(false);
-        setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Tutor Socrático." }]);
-      }
-      return;
-    }
-
     try {
+      // Id provisional para el caso de que este mensaje resulte ser un problema
+      // nuevo — así la interpretación queda etiquetada con el mismo id que
+      // tendrá el ejercicio en la base de datos, desde el primer mensaje.
+      const provisionalId = crypto.randomUUID();
+
       // Si ya hay un modelo cargado en este módulo, se lo pasamos al Resolutor como
       // contexto: así puede detectar ediciones incrementales ("agrega también este
       // origen por $80") y devolver el mismo modelo con el cambio aplicado, en vez
@@ -1541,71 +1662,113 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
         ? { moduleType: activeModule, data: activeModelData.data }
         : undefined;
 
-      const interpretRes = await fetch("http://localhost:4000/api/tutor/interpret", {
+      const interpretRes = await fetch(`${API_BASE_URL}/api/tutor/interpret`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userMessage: text, currentModel })
+        body: JSON.stringify({ userMessage: text, currentModel, modelId: activeExerciseId || provisionalId })
       });
       const interpretData = await interpretRes.json();
+      const isNewProblem = interpretData.status === "success" && interpretData.isNewProblem && interpretData.moduleType && interpretData.data;
 
-      if (interpretData.status === "success" && interpretData.isNewProblem && interpretData.moduleType && interpretData.data) {
+      if (isNewProblem) {
         const label = MODULE_TYPE_LABELS[interpretData.moduleType] ?? interpretData.moduleType;
-        const solvedModel = await onModelInterpreted(interpretData.moduleType as ModuleId, interpretData.data);
+        setActiveExerciseId(provisionalId);
 
-        if (!solvedModel) {
+        if (socraticMode) {
+          // Guarda el ejercicio (para que aparezca en Historial) SIN resolverlo:
+          // el modo socrático nunca revela la solución directamente.
+          const savedModel = await onModelInterpreted(interpretData.moduleType as ModuleId, interpretData.data, provisionalId, false);
           setTyping(false);
           setMessages(m => [...m, {
             role: "assistant",
-            text: `📥 Detecté un problema de **${label}**, pero no pude resolverlo automáticamente (¿existe ese módulo en la base de datos?). Revisa el editor.`
+            text: savedModel
+              ? `📥 Detecté un problema de **${label}**. ${interpretData.explanation ?? ""}\n\nVamos a explorarlo con preguntas — no te voy a dar la solución directamente.`
+              : `📥 Detecté un problema de **${label}**, pero no pude guardarlo (¿existe ese módulo en la base de datos?).`
           }]);
+          // Sigue más abajo con la primera pregunta orientadora del modo socrático.
+        } else {
+          const solvedModel = await onModelInterpreted(interpretData.moduleType as ModuleId, interpretData.data, provisionalId, true);
+
+          if (!solvedModel) {
+            setTyping(false);
+            setMessages(m => [...m, {
+              role: "assistant",
+              text: `📥 Detecté un problema de **${label}**, pero no pude resolverlo automáticamente (¿existe ese módulo en la base de datos?). Revisa el editor.`
+            }]);
+            return;
+          }
+
+          const askData = await askAboutActiveModel(text, historyBeforeThis, provisionalId);
+          setTyping(false);
+
+          const intro = `📥 **${label}** — ${interpretData.explanation ?? ""}\n\n`;
+          const narration = askData.status === "success" && askData.reply
+            ? askData.reply
+            : "Ya resolví el modelo; revisa los resultados y el detalle paso a paso en el panel.";
+          setMessages(m => [...m, { role: "assistant", text: intro + narration }]);
+
+          // LLM #2: validador independiente, revisa el trabajo del LLM #1 antes de darlo por bueno.
+          setTyping(true);
+          try {
+            const validateRes = await fetch(`${API_BASE_URL}/api/tutor/validate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                originalMessage: text,
+                moduleType: interpretData.moduleType,
+                data: interpretData.data,
+                solvedSolution: solvedModel.solutions?.[0] || {},
+                modelId: provisionalId
+              })
+            });
+            const validateData = await validateRes.json();
+            setTyping(false);
+
+            if (validateData.status === "success") {
+              const verdictEmoji: Record<string, string> = { valido: "✅", con_observaciones: "⚠️", invalido: "❌" };
+              const emoji = verdictEmoji[validateData.verdict] ?? "🔍";
+              const checksText = (validateData.checks_realizados as string[] || []).map((c: string) => `• ${c}`).join("\n");
+              const issuesText = (validateData.issues as string[] || []).length > 0
+                ? `\n\nProblemas encontrados:\n${(validateData.issues as string[]).map((i: string) => `• ${i}`).join("\n")}`
+                : "";
+              setMessages(m => [...m, {
+                role: "assistant",
+                text: `${emoji} Validación independiente: ${validateData.summary}\n\n${checksText}${issuesText}`
+              }]);
+            }
+          } catch {
+            setTyping(false);
+          }
           return;
         }
+      }
 
-        const askData = await askAboutActiveModel(text, historyBeforeThis);
-        setTyping(false);
-
-        const intro = `📥 **${label}** — ${interpretData.explanation ?? ""}\n\n`;
-        const narration = askData.status === "success" && askData.reply
-          ? askData.reply
-          : "Ya resolví el modelo; revisa los resultados y el detalle paso a paso en el panel.";
-        setMessages(m => [...m, { role: "assistant", text: intro + narration }]);
-
-        // LLM #2: validador independiente, revisa el trabajo del LLM #1 antes de darlo por bueno.
-        setTyping(true);
+      if (socraticMode) {
+        // Ya sea la primera pregunta tras detectar un problema nuevo, o una
+        // respuesta de seguimiento dentro de la misma exploración socrática.
         try {
-          const validateRes = await fetch("http://localhost:4000/api/tutor/validate", {
+          const response = await fetch(`${API_BASE_URL}/api/tutor/socratic`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              originalMessage: text,
-              moduleType: interpretData.moduleType,
-              data: interpretData.data,
-              solvedSolution: solvedModel.solutions?.[0] || {}
+              activeModule,
+              userMessage: text,
+              modelId: isNewProblem ? provisionalId : activeExerciseId,
+              chatHistory: historyBeforeThis.map(m => ({ role: m.role === "assistant" ? "model" : "user", text: m.text }))
             })
           });
-          const validateData = await validateRes.json();
+          const resData = await response.json();
           setTyping(false);
-
-          if (validateData.status === "success") {
-            const verdictEmoji: Record<string, string> = { valido: "✅", con_observaciones: "⚠️", invalido: "❌" };
-            const emoji = verdictEmoji[validateData.verdict] ?? "🔍";
-            const checksText = (validateData.checks_realizados as string[] || []).map((c: string) => `• ${c}`).join("\n");
-            const issuesText = (validateData.issues as string[] || []).length > 0
-              ? `\n\nProblemas encontrados:\n${(validateData.issues as string[]).map((i: string) => `• ${i}`).join("\n")}`
-              : "";
-            setMessages(m => [...m, {
-              role: "assistant",
-              text: `${emoji} Validación independiente: ${validateData.summary}\n\n${checksText}${issuesText}`
-            }]);
-          }
-        } catch {
+          setMessages(m => [...m, { role: "assistant", text: resData.status === "success" ? resData.reply : "No pude generar una pregunta orientadora en este momento." }]);
+        } catch (error) {
           setTyping(false);
+          setMessages(m => [...m, { role: "assistant", text: "Error de conexión con el Tutor Socrático." }]);
         }
         return;
       }
 
       // No es un problema nuevo (o la interpretación falló): responder como tutor sobre el modelo activo.
-      const askData = await askAboutActiveModel(text, historyBeforeThis);
+      const askData = await askAboutActiveModel(text, historyBeforeThis, activeExerciseId);
       setTyping(false);
       if (askData.status === "success" && askData.reply) {
         setMessages(m => [...m, { role: "assistant", text: askData.reply }]);
@@ -1916,6 +2079,7 @@ export default function App() {
     const saved = localStorage.getItem("tl_dark_mode");
     return saved === null ? false : saved === "true";
   });
+  const [historialOpen, setHistorialOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("tl_dark_mode", String(dark));
@@ -1941,7 +2105,7 @@ export default function App() {
 
   const fetchModels = async () => {
     try {
-      const res = await fetch("http://localhost:4000/api/models");
+      const res = await fetch(`${API_BASE_URL}/api/models`);
       const json = await res.json();
       if (json.status === "success" && Array.isArray(json.data)) {
         setDbModels(json.data);
@@ -1974,21 +2138,23 @@ export default function App() {
     }
   };
 
+  // Guarda los parámetros editados a mano como un ejercicio NUEVO del historial
+  // (no sobreescribe el que se estaba editando) y lo resuelve.
   const handleSaveAndSolve = async () => {
     if (jsonError || !activeModelData) return;
     setSolving(true);
     try {
       const parsedData = JSON.parse(jsonText);
-      const response = await fetch(`http://localhost:4000/api/models/${activeModelData.id}`, {
-        method: "PUT",
+      const response = await fetch(`${API_BASE_URL}/api/models`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: parsedData })
+        body: JSON.stringify({ id: crypto.randomUUID(), type: activeModelData.type, data: parsedData, solve: true })
       });
       const result = await response.json();
       if (result.status === "success" && result.data) {
-        setDbModels(prev => prev.map(m => m.id === activeModelData.id ? result.data : m));
+        setDbModels(prev => [result.data, ...prev]);
         setEditing(false);
-        alert("¡Parámetros guardados y modelo resuelto con éxito!");
+        alert("¡Parámetros guardados como ejercicio nuevo y resuelto con éxito!");
       } else {
         alert(`Error al guardar y resolver: ${result.message}`);
       }
@@ -1999,9 +2165,11 @@ export default function App() {
     }
   };
 
+  // Vuelve a resolver el modelo activo con los mismos parámetros, guardando el
+  // resultado como un ejercicio NUEVO del historial (cada resolución queda
+  // registrada por separado, no se pierde la anterior).
   const handleRunSolver = async () => {
     if (activeModule === "overview") return;
-    const solverType = MODULE_TO_SOLVER_PATH[activeModule];
     const model = dbModels.find(m => m.type.toUpperCase() === MODULE_TO_DB_TYPE[activeModule]);
     if (!model) {
       alert("No se encontró configuración para este modelo en la base de datos.");
@@ -2010,35 +2178,15 @@ export default function App() {
 
     setSolving(true);
     try {
-      const response = await fetch(`http://localhost:4000/api/${solverType}/solve`, {
+      const response = await fetch(`${API_BASE_URL}/api/models`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(model.data)
+        body: JSON.stringify({ id: crypto.randomUUID(), type: model.type, data: model.data, solve: true })
       });
       const result = await response.json();
-      if (result.status === "success") {
-        setDbModels(prev => prev.map(m => {
-          if (m.id === model.id) {
-            const variables = result.data.variables ?? result.data.allocations ?? result.data.result?.flows ?? result.data.decisions ?? [result.data.result];
-            const objectiveValue = result.data.objective_value ?? result.data.total_cost ?? result.data.result?.total_cost ?? result.data.optimal_value ?? null;
-            const constraints = result.data.constraints ?? result.data.details ?? {};
-            return {
-              ...m,
-              solutions: [{
-                // Se conserva el payload completo del solver (steps, method_used,
-                // initial_solution, comparisons, steps_note, etc.) además de los
-                // alias normalizados que ya esperan las vistas existentes.
-                ...result.data,
-                status: result.data.status,
-                objectiveValue,
-                variables,
-                constraints
-              }]
-            };
-          }
-          return m;
-        }));
-        alert(`¡Modelo ${model.type} resuelto con éxito! Nueva solución guardada.`);
+      if (result.status === "success" && result.data) {
+        setDbModels(prev => [result.data, ...prev]);
+        alert(`¡Modelo ${model.type} resuelto con éxito! Nuevo ejercicio guardado en el historial.`);
       } else {
         alert(`Error al resolver el modelo: ${result.message}`);
       }
@@ -2050,33 +2198,31 @@ export default function App() {
   };
 
   // Llamado por el chat del tutor cuando detecta un enunciado nuevo: cambia de módulo,
-  // guarda y resuelve automáticamente (reusa el mismo endpoint que "Guardar y Resolver"),
-  // y devuelve el modelo ya resuelto para que el chat narre el resultado.
-  const handleModelInterpreted = async (moduleType: ModuleId, data: any): Promise<any> => {
-    const model = dbModels.find(m => m.type.toUpperCase() === MODULE_TO_DB_TYPE[moduleType]);
-    if (!model) {
-      return null;
-    }
+  // crea el ejercicio como una entrada NUEVA del historial (nunca sobreescribe uno
+  // anterior del mismo módulo) usando el id que el chat generó para poder etiquetar
+  // sus propias interacciones de IA con el mismo id desde el primer mensaje.
+  // Si `solve` es false (modo socrático), el ejercicio se guarda sin resolver.
+  const handleModelInterpreted = async (moduleType: ModuleId, data: any, exerciseId: string, solve: boolean = true): Promise<any> => {
     setActiveModule(moduleType);
     setJsonText(JSON.stringify(data, null, 2));
     setJsonError(null);
-    setSolving(true);
+    if (solve) setSolving(true);
     try {
-      const response = await fetch(`http://localhost:4000/api/models/${model.id}`, {
-        method: "PUT",
+      const response = await fetch(`${API_BASE_URL}/api/models`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data })
+        body: JSON.stringify({ id: exerciseId, type: MODULE_TO_DB_TYPE[moduleType], data, solve })
       });
       const result = await response.json();
       if (result.status === "success" && result.data) {
-        setDbModels(prev => prev.map(m => m.id === model.id ? result.data : m));
+        setDbModels(prev => [result.data, ...prev]);
         return result.data;
       }
       return null;
     } catch (err) {
       return null;
     } finally {
-      setSolving(false);
+      if (solve) setSolving(false);
     }
   };
 
@@ -2136,31 +2282,17 @@ export default function App() {
               <span className="font-mono ml-8 text-[10px] opacity-50">⌘K</span>
             </div>
 
-            {/* Anexo de interacción con IA (rúbrica académica) */}
-            <div className="hidden md:flex items-center rounded-lg text-xs font-mono overflow-hidden"
-              style={{ border: `1px solid ${borderColor}` }}>
-              <a
-                href="http://localhost:4000/api/audit/annex?format=pdf"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Descargar anexo de interacción con IA generativa en PDF (formato ficha, listo para el informe)"
-                className="flex items-center gap-1.5 px-3 py-1.5 transition-colors"
-                style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: textMuted }}
-              >
-                <Download size={13} />
-                <span>Anexo IA (PDF)</span>
-              </a>
-              <a
-                href="http://localhost:4000/api/audit/annex?format=csv"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Descargar anexo de interacción con IA generativa en CSV (tabla para Excel)"
-                className="px-2 py-1.5 transition-colors border-l"
-                style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: textMuted, borderColor }}
-              >
-                CSV
-              </a>
-            </div>
+            {/* Historial de ejercicios: cada resolución (chat o "Resolver") queda como una
+                entrada propia; desde acá se elige cuál ver/descargar como Anexo IA. */}
+            <button
+              onClick={() => setHistorialOpen(true)}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors"
+              title="Ver el historial de ejercicios resueltos y descargar el Anexo IA de cada uno"
+              style={{ background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", border: `1px solid ${borderColor}`, color: textMuted }}
+            >
+              <Clock size={13} />
+              <span>Historial</span>
+            </button>
 
             {/* Dark mode toggle */}
             <button
@@ -2284,6 +2416,8 @@ export default function App() {
 
       {/* AI Tutor */}
       <AiTutor dark={dark} activeModule={activeModule} activeModelData={activeModelData} onModelInterpreted={handleModelInterpreted} />
+
+      {historialOpen && <HistorialPanel dark={dark} dbModels={dbModels} onClose={() => setHistorialOpen(false)} />}
 
       <style>{`
         * { scrollbar-width: none; }

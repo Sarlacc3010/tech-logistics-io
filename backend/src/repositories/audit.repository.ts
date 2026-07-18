@@ -5,6 +5,7 @@ export interface AuditLog {
   id: string;
   timestamp: string;
   type: string;
+  modelId?: string;
   request: any;
   response: any;
 }

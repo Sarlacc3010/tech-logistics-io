@@ -49,6 +49,7 @@ export function auditMiddleware(type: string) {
 
           IAInteraction.create({
             userId,
+            modelId: req.body.modelId || undefined,
             problemContext,
             mathematicalSolution,
             chatHistory: updatedHistory,
@@ -63,6 +64,7 @@ export function auditMiddleware(type: string) {
           // Save to standard JSON file audit repository (e.g. for solvers)
           AuditRepository.save({
             type,
+            modelId: req.body.modelId || undefined,
             request: {
               body: req.body,
               query: req.query,

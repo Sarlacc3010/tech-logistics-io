@@ -8,6 +8,7 @@ export interface IChatMessage {
 
 export interface IIAInteraction extends Document {
   userId: string;
+  modelId?: string;
   problemContext: string;
   mathematicalSolution?: any;
   chatHistory: IChatMessage[];
@@ -22,6 +23,7 @@ const ChatMessageSchema = new Schema<IChatMessage>({
 
 const IAInteractionSchema = new Schema<IIAInteraction>({
   userId: { type: String, required: true, index: true },
+  modelId: { type: String, index: true },
   problemContext: { type: String, required: true },
   mathematicalSolution: { type: Schema.Types.Mixed },
   chatHistory: { type: [ChatMessageSchema], default: [], required: true },
