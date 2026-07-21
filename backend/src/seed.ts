@@ -72,7 +72,10 @@ async function main() {
         status: lpSol.status,
         objectiveValue: lpSol.objective_value,
         variables: lpSol.variables,
-        constraints: lpSol.constraints,
+        // rawResponse se guarda igual que en createModel (database.controller.ts) para
+        // que las vistas puedan leer campos como steps/result sin importar si el
+        // ejercicio se creo por seed o en tiempo real.
+        constraints: { ...(lpSol.constraints ?? {}), rawResponse: lpSol },
         modelId: lpModel.id,
       },
     });
@@ -109,7 +112,7 @@ async function main() {
         status: transportSol.status,
         objectiveValue: transportSol.total_cost,
         variables: transportSol.allocations,
-        constraints: {},
+        constraints: { rawResponse: transportSol },
         modelId: transportModel.id,
       },
     });
@@ -155,7 +158,7 @@ async function main() {
         status: networksSol.status,
         objectiveValue: networksSol.result.total_cost,
         variables: networksSol.result.flows,
-        constraints: {},
+        constraints: { rawResponse: networksSol },
         modelId: networksModel.id,
       },
     });
@@ -189,7 +192,7 @@ async function main() {
         status: dynamicSol.status,
         objectiveValue: dynamicSol.optimal_value,
         variables: dynamicSol.decisions,
-        constraints: dynamicSol.details || {},
+        constraints: { ...(dynamicSol.details ?? {}), rawResponse: dynamicSol },
         modelId: dynamicModel.id,
       },
     });
@@ -226,7 +229,7 @@ async function main() {
         status: inventoriesSol.status,
         objectiveValue: inventoriesSol.result.total_cost,
         variables: [inventoriesSol.result],
-        constraints: {},
+        constraints: { rawResponse: inventoriesSol },
         modelId: inventoriesModel.id,
       },
     });

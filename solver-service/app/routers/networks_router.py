@@ -83,15 +83,21 @@ def solve_network(payload: NetworkProblemInput):
         elif alg == "min_cost_flow":
             if not payload.demands:
                 raise HTTPException(status_code=400, detail="demands dict is required for min_cost_flow")
+            # nx.network_simplex requiere pesos/capacidades/demandas enteros; con int() se
+            # truncaba la parte decimal en silencio. Se escala por SCALE (workaround oficial
+            # de NetworkX) para conservar hasta 3 decimales exactos y se revierte al final.
+            SCALE = 1000
             G = nx.DiGraph()
             for e in payload.edges:
-                cap = int(e.capacity) if e.capacity is not None else None
-                weight = int(e.weight) if e.weight is not None else 0
+                cap = round(e.capacity * SCALE) if e.capacity is not None and e.capacity != float("inf") else None
+                weight = round((e.weight if e.weight is not None else 0.0) * SCALE)
                 G.add_edge(e.source, e.target, capacity=cap, weight=weight)
             for node, d in payload.demands.items():
-                G.nodes[node]['demand'] = int(d)
+                G.nodes[node]['demand'] = round(d * SCALE)
 
             flow_cost, flow_dict = nx.network_simplex(G)
+            flow_cost = flow_cost / (SCALE * SCALE)
+            flow_dict = {u: {v: f / SCALE for v, f in vs.items()} for u, vs in flow_dict.items()}
             return NetworkSolutionOutput(
                 algorithm=payload.algorithm,
                 status="Optimal",
