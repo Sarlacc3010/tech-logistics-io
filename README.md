@@ -125,7 +125,7 @@ La interfaz compara el costo inicial de los tres métodos y muestra cada iteraci
 | **Dijkstra** | Ruta más corta | Fija el nodo de menor distancia tentativa y relaja arcos; rechaza pesos negativos |
 | **Kruskal** | Árbol de expansión mínima | Aristas ordenadas por peso + Union-Find (detección de ciclos) |
 | **Edmonds-Karp** | Flujo máximo | Ford-Fulkerson con BFS sobre el grafo residual |
-| **Network Simplex (NetworkX)** | Flujo de costo mínimo | Sin trazado de pasos |
+| **Network Simplex (NetworkX)** | Flujo de costo mínimo | Sin trazado de pasos; pesos/capacidades/demandas decimales se escalan x1000 antes de resolver para no perder precisión (workaround oficial de NetworkX) |
 
 *Los tres algoritmos propios verificados contra NetworkX.*
 
@@ -148,6 +148,8 @@ La interfaz compara el costo inicial de los tres métodos y muestra cada iteraci
 |---|---|
 | `knapsack` | Mochila 0/1 — tabla DP completa (recurrencia de Bellman) + backtracking |
 | `lot_sizing` | Wagner-Whitin — DP hacia atrás, reconstruye la política óptima de pedidos |
+
+Ambos algoritmos son 100% propios (sin librerías) y devuelven `steps[]` con el detalle paso a paso de la tabla, igual que el resto de los módulos.
 
 ---
 
@@ -383,6 +385,7 @@ tech-logistics-io/
 │       ├── routers/              # lp, transport, networks, inventories, dynamic
 │       └── rag_pipeline.py       # Indexación de PDFs (ChromaDB)
 ├── docs/
+│   ├── INFORME_TECNICO.md              # Cómo está programado cada método + changelog
 │   └── Algoritmos_de_Resolucion.docx   # Anexo técnico (métodos por módulo)
 ├── docker-compose.yml
 └── README.md
@@ -401,6 +404,7 @@ tech-logistics-io/
 
 ## Documentación adicional
 
+- **[docs/INFORME_TECNICO.md](docs/INFORME_TECNICO.md)** — informe técnico detallado: cómo está programado cada método (con referencia a archivo/función), cómo funciona la app de punta a punta, qué es propio y qué usa librerías, y el changelog de correcciones aplicadas en la última revisión.
 - **[docs/Algoritmos_de_Resolucion.docx](docs/Algoritmos_de_Resolucion.docx)** — anexo técnico con la explicación formal de cada método (fórmulas, procedimientos, verificaciones) listo para el informe final.
 - **Anexo de Interacción con IA** — se genera en vivo desde la app (botón *"Historial"*, uno por ejercicio o el conjunto completo vía `/api/audit/annex`) con el formato que exige la rúbrica: herramienta, fecha, objetivo, prompt, respuesta y validación.
 

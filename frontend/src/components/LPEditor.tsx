@@ -11,6 +11,8 @@ interface LPVariable {
   name: string;
   objCoef: number;
   lowBound: number;
+  upBound: number | null;
+  isInteger: boolean;
 }
 
 interface LPConstraint {
@@ -69,7 +71,7 @@ export function LPEditor({ jsonText, onChange, dark = true }: LPEditorProps) {
 
   const addVariable = () => {
     const newName = `x${data.variables.length + 1}`;
-    const newVars = [...data.variables, { name: newName, objCoef: 0, lowBound: 0 }];
+    const newVars = [...data.variables, { name: newName, objCoef: 0, lowBound: 0, upBound: null, isInteger: false }];
     const newConsts = data.constraints.map(c => ({
       ...c,
       coefficients: { ...c.coefficients, [newName]: 0 }
@@ -146,6 +148,8 @@ export function LPEditor({ jsonText, onChange, dark = true }: LPEditorProps) {
                 <th className="p-2 text-left font-mono font-medium text-muted-foreground">Variable</th>
                 <th className="p-2 text-left font-mono font-medium text-muted-foreground">Coef. Función Objetivo</th>
                 <th className="p-2 text-left font-mono font-medium text-muted-foreground">Límite Inf. (LowBound)</th>
+                <th className="p-2 text-left font-mono font-medium text-muted-foreground">Límite Sup. (UpBound)</th>
+                <th className="p-2 text-center font-mono font-medium text-muted-foreground">Entera</th>
                 <th className="p-2 w-8"></th>
               </tr>
             </thead>
@@ -183,15 +187,39 @@ export function LPEditor({ jsonText, onChange, dark = true }: LPEditorProps) {
                     />
                   </td>
                   <td className="p-2">
-                    <input 
-                      type="number" 
-                      value={v.lowBound} 
+                    <input
+                      type="number"
+                      value={v.lowBound}
                       onChange={e => {
                         const newVars = [...data.variables];
                         newVars[i].lowBound = parseFloat(e.target.value) || 0;
                         sync({ ...data, variables: newVars });
                       }}
-                      className={inputClass} 
+                      className={inputClass}
+                    />
+                  </td>
+                  <td className="p-2">
+                    <input
+                      type="number"
+                      placeholder="Sin límite"
+                      value={v.upBound ?? ''}
+                      onChange={e => {
+                        const newVars = [...data.variables];
+                        newVars[i].upBound = e.target.value === '' ? null : (parseFloat(e.target.value) || 0);
+                        sync({ ...data, variables: newVars });
+                      }}
+                      className={inputClass}
+                    />
+                  </td>
+                  <td className="p-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={!!v.isInteger}
+                      onChange={e => {
+                        const newVars = [...data.variables];
+                        newVars[i].isInteger = e.target.checked;
+                        sync({ ...data, variables: newVars });
+                      }}
                     />
                   </td>
                   <td className="p-2 text-center">
