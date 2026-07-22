@@ -1,3 +1,5 @@
+"""Utilidades compartidas del módulo de Transporte."""
+
 import numpy as np
 
 def balance_transport_problem(supply: list[float], demand: list[float], costs: list[list[float]]):
@@ -8,26 +10,27 @@ def balance_transport_problem(supply: list[float], demand: list[float], costs: l
     supply = np.array(supply, dtype=float)
     demand = np.array(demand, dtype=float)
     costs = np.array(costs, dtype=float)
-    
+
     total_supply = np.sum(supply)
     total_demand = np.sum(demand)
-    
+
     origins = [f"O{i+1}" for i in range(len(supply))]
     destinations = [f"D{j+1}" for j in range(len(demand))]
-    
+
     diff = abs(total_supply - total_demand)
-    
+
     if total_supply > total_demand:
-        # Fictitious destination (column)
+        # Sobra oferta: se agrega un destino ficticio que "absorbe" el excedente
+        # sin costo, para que el problema quede balanceado (oferta == demanda).
         demand = np.append(demand, diff)
         fictitious_col = np.zeros((costs.shape[0], 1))
         costs = np.hstack((costs, fictitious_col))
         destinations.append("D_Ficticio")
     elif total_demand > total_supply:
-        # Fictitious origin (row)
+        # Sobra demanda: se agrega un origen ficticio análogo, con costo 0.
         supply = np.append(supply, diff)
         fictitious_row = np.zeros((1, costs.shape[1]))
         costs = np.vstack((costs, fictitious_row))
         origins.append("O_Ficticio")
-        
+
     return supply, demand, costs, origins, destinations

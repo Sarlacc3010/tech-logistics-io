@@ -64,6 +64,7 @@ const MODULE_TO_DB_TYPE: Record<ModuleId, string> = {
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
 
+// Tooltip genérico para los gráficos de Recharts (barras, líneas, área, radar).
 function ChartTooltip({ active, payload, label, dark }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -82,6 +83,7 @@ function ChartTooltip({ active, payload, label, dark }: any) {
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
+// Contenedor con borde y sombra sutil reutilizado en toda la interfaz.
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={`rounded-lg border border-border bg-card ${className}`}
@@ -91,6 +93,7 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
   );
 }
 
+// Mensaje "aún no hay datos" mostrado en cada vista de módulo antes de resolver un ejercicio.
 function EmptyState({ dark, title, sub }: { dark: boolean; title: string; sub: string }) {
   return (
     <motion.div
@@ -123,6 +126,7 @@ function formatLinearExpr(terms?: Record<string, number>): string {
   }).join("");
 }
 
+// Encabezado estándar de sección dentro de una Card (título + subtítulo + acciones a la derecha).
 function SectionHeader({ title, sub, actions }: { title: string; sub?: string; actions?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
@@ -135,6 +139,7 @@ function SectionHeader({ title, sub, actions }: { title: string; sub?: string; a
   );
 }
 
+// Etiqueta pequeña de estado (ej. "ÓPTIMO", "BALANCEADO"), coloreada según variant.
 function Badge({ label, variant = "default" }: { label: string; variant?: "default" | "success" | "warning" | "danger" | "info" }) {
   const cls = {
     default: "bg-primary/10 text-primary border-primary/20",
@@ -150,6 +155,7 @@ function Badge({ label, variant = "default" }: { label: string; variant?: "defau
   );
 }
 
+// Botón cuadrado de solo ícono (refrescar, cerrar, etc.).
 function IconBtn({ icon: Icon, onClick, title }: { icon: React.ElementType; onClick?: () => void; title?: string }) {
   return (
     <button onClick={onClick} title={title}
@@ -161,6 +167,9 @@ function IconBtn({ icon: Icon, onClick, title }: { icon: React.ElementType; onCl
 
 // ─── Logistics Map (SVG) ─────────────────────────────────────────────────────
 
+// Red logística de ejemplo (hubs y rutas fijos) mostrada en el mapa del Panel
+// de Control cuando no hay un ejercicio de Transporte/Redes activo que
+// mostrar — es decoración/demo, no datos reales de ningún ejercicio.
 const HUBS = [
   { id: "NY",  label: "New York",   x: 230, y: 112 },
   { id: "LA",  label: "Los Angeles",x: 134, y: 126 },
@@ -580,6 +589,8 @@ const AUDIT_TYPE_LABELS: Record<string, string> = {
   groq_tutor_socratic: "IA: guía socrática",
 };
 
+// Panel de Control (ruta "/"): KPIs globales derivados de dbModels (módulos
+// resueltos, último objetivo por módulo) y el mapa de red de ejemplo.
 function OverviewView({ dark, dbModels }: { dark: boolean; dbModels: any[] }) {
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
 
@@ -677,6 +688,9 @@ function OverviewView({ dark, dbModels }: { dark: boolean; dbModels: any[] }) {
   );
 }
 
+// Vista de resultados de Programación Lineal / Entera: formulación del
+// problema, solución óptima (con costo reducido y cotas), análisis de
+// sensibilidad, y el detalle paso a paso del Simplex propio (si aplica).
 function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
   const problem = modelData?.data;
@@ -833,6 +847,8 @@ function LPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   );
 }
 
+// Vista de resultados de Transporte: tabla de costos, mapa real de rutas,
+// plan óptimo, análisis de sensibilidad y detalle paso a paso de MODI.
 function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
   const problem = modelData?.data;
@@ -1084,6 +1100,9 @@ function TransportView({ dark, modelData }: { dark: boolean; modelData?: any }) 
   );
 }
 
+// Vista de resultados de Redes: mapa real de la red y resultado específico
+// según el algoritmo (ruta más corta, árbol de expansión mínima, flujo
+// máximo o de costo mínimo), más el detalle paso a paso si el algoritmo lo genera.
 function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
   const algorithm = activeSolution?.algorithm;
@@ -1198,6 +1217,8 @@ function NetworksView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   );
 }
 
+// Vista de resultados de Programación Dinámica: política de pedidos (lot_sizing)
+// u objetos seleccionados (knapsack), más el detalle paso a paso de la tabla DP.
 function DPView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
   const problemType = modelData?.data?.problem_type;
@@ -1273,6 +1294,9 @@ const INVENTORY_FIELD_LABELS: Record<string, string> = {
   cycle_time_days: "Días de ciclo",
 };
 
+// Vista de resultados de Inventarios: tarjetas de KPI según calc_type (EOQ,
+// punto de reorden, etc.), tabla de niveles de precio o clasificación ABC
+// cuando aplica, y el detalle paso a paso de la sustitución en la fórmula.
 function InventoriesView({ dark, modelData }: { dark: boolean; modelData?: any }) {
   const activeSolution = modelData?.solutions?.[0];
   const calcType = modelData?.data?.calc_type;
@@ -1402,6 +1426,7 @@ const MODULE_INTROS: Record<ModuleId, string> = {
 type ChatMessage = { role: "user" | "assistant"; text: string };
 const CHAT_HISTORY_STORAGE_KEY = "tl_chat_history_v1";
 
+// Recupera el historial de chat guardado en localStorage (uno por módulo), para que no se pierda al recargar la página.
 function loadStoredChatHistories(): Partial<Record<ModuleId, ChatMessage[]>> {
   try {
     const raw = localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
@@ -1533,6 +1558,10 @@ function HistorialPanel({ dark, dbModels, onClose }: { dark: boolean; dbModels: 
   );
 }
 
+// Panel de chat del tutor de IA: interpretación de enunciados, modo directo
+// vs. socrático, validación independiente, subida de PDFs (RAG) y persistencia
+// del historial de conversación por módulo. Es el componente que orquesta las
+// llamadas a /tutor/interpret, /tutor/validate, /tutor/socratic y /tutor/ask.
 function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { dark: boolean; activeModule: ModuleId; activeModelData?: any; onModelInterpreted: (moduleType: ModuleId, data: any, exerciseId: string, solve?: boolean) => Promise<any> }) {
   const [open, setOpen] = useState(false);
   // Historial persistido por módulo (localStorage), para no perder la conversación al cambiar
@@ -1614,6 +1643,9 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
     networks: "Redes", dp: "Programación Dinámica", inventories: "Inventarios",
   };
 
+  // Llama al Narrador (/tutor/ask) para explicar en lenguaje de negocio el
+  // modelo/solución actualmente activos en este módulo, o responder una
+  // pregunta de seguimiento del estudiante sobre ellos.
   const askAboutActiveModel = async (text: string, historyBeforeThis: { role: "user" | "assistant"; text: string }[], modelId?: string) => {
     const solution = activeModelData?.solutions?.[0] || {};
     const problemContext = `Active Module: ${activeModule}. Model configuration: ${JSON.stringify(activeModelData?.data || {})}`;
@@ -1944,6 +1976,7 @@ function AiTutor({ dark, activeModule, activeModelData, onModelInterpreted }: { 
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
+// Barra de navegación lateral entre los 7 módulos (colapsable en desktop, tipo drawer en mobile).
 function Sidebar({
   active, setActive, collapsed, setCollapsed, dark, mobileOpen, setMobileOpen,
 }: {
@@ -2074,6 +2107,9 @@ function Sidebar({
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
+// Componente raíz: layout general (sidebar + topbar + panel del módulo activo
+// + chat del tutor + Historial), estado global de ejercicios (dbModels) y los
+// handlers para editar/guardar/resolver el ejercicio del módulo activo.
 export default function App() {
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem("tl_dark_mode");
@@ -2103,6 +2139,7 @@ export default function App() {
   const [jsonText, setJsonText] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
 
+  // Carga TODO el historial de ejercicios (todos los módulos, más reciente primero) desde Postgres.
   const fetchModels = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/models`);
@@ -2234,6 +2271,7 @@ export default function App() {
   const accentBlue = dark ? "#3B82F6" : "#1345A8";
   const currentModule = MODULES.find(m => m.id === activeModule)!;
 
+  // Elige qué vista de resultados renderizar según el módulo activo ("ip" reutiliza LPView, ver MODULE_TO_DB_TYPE).
   const moduleView = {
     overview:    <OverviewView dark={dark} dbModels={dbModels} />,
     lp:          <LPView dark={dark} modelData={activeModelData} />,

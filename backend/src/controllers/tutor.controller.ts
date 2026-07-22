@@ -1,3 +1,13 @@
+/**
+ * Controllers del Tutor de IA multi-LLM: interpretación de enunciados,
+ * validación independiente, modo socrático y explicación de resultados.
+ *
+ * Patrón compartido en los 4 endpoints: se intenta primero con un proveedor
+ * (Groq o Gemini según el rol) y, si ese proveedor devuelve un error de cuota
+ * (HTTP 429), se reintenta automáticamente con el otro proveedor antes de
+ * fallar — así el estudiante nunca se queda sin respuesta solo porque un LLM
+ * agotó su límite gratuito.
+ */
 import { Request, Response, NextFunction } from 'express';
 import { GroqService } from '../services/groq.service';
 import { GeminiService } from '../services/gemini.service';
@@ -54,6 +64,9 @@ const TutorRequestSchema = z.object({
 });
 
 // ─── Interpret Problem ────────────────────────────────────────────────────────
+// LLM #1 (Resolutor): recibe el enunciado en lenguaje natural y devuelve
+// {isNewProblem, moduleType, data} — decide a cuál de los 6 módulos pertenece
+// y construye el JSON de parámetros exacto que ese módulo espera.
 // Groq (Resolutor) es el primario: así no se consume la cuota diaria gratuita
 // de Gemini en cada mensaje del chat. Si Groq alcanza SU propio rate limit
 // (429), se hace fallback a Gemini para no dejar al usuario sin respuesta.
@@ -84,7 +97,11 @@ export async function interpretProblem(req: Request, res: Response, next: NextFu
 }
 
 // ─── Validate Solution ────────────────────────────────────────────────────────
-// Gemini primero → Groq como fallback.
+// LLM #2 (Validador independiente): recalcula la aritmética por su cuenta a
+// partir del enunciado original y del resultado obtenido, y emite un veredicto
+// (válido/con observaciones/inválido). Es el proveedor "contrario" al de la
+// interpretación (Gemini primero, Groq de respaldo) para que la validación sea
+// genuinamente independiente, no el mismo modelo revisándose a sí mismo.
 export async function validateSolution(req: Request, res: Response, next: NextFunction) {
   try {
     const parseResult = ValidateRequestSchema.safeParse(req.body);
@@ -108,6 +125,8 @@ export async function validateSolution(req: Request, res: Response, next: NextFu
       result = await GroqService.validateSolution(originalMessage, moduleType, data, solvedSolution);
     }
 
+    // validatedBy viaja en la respuesta para que el Anexo IA pueda mostrar qué
+    // proveedor validó realmente cada interacción (útil si hubo fallback).
     res.status(200).json({ status: 'success', validatedBy, ...result });
   } catch (error) {
     next(error);
@@ -115,6 +134,9 @@ export async function validateSolution(req: Request, res: Response, next: NextFu
 }
 
 // ─── Socratic Guidance ────────────────────────────────────────────────────────
+// Modo socrático: en vez de resolver, hace 1-3 preguntas orientadoras por
+// turno para que el estudiante construya el modelo (variables, función
+// objetivo, restricciones) por sí mismo, sin revelar el resultado.
 // Groq (Tutor Socrático) es el primario: esta ruta se llama en cada turno del
 // chat, así que usar Gemini aquí por defecto agotaría su cuota diaria gratuita
 // en minutos. Si Groq alcanza SU propio rate limit (429), se hace fallback a
@@ -147,6 +169,8 @@ export async function socraticGuidance(req: Request, res: Response, next: NextFu
 }
 
 // ─── Ask Tutor ────────────────────────────────────────────────────────────────
+// LLM #3 (Narrador): traduce una solución ya resuelta a lenguaje de negocio, o
+// responde preguntas de seguimiento del estudiante sobre esa solución.
 // Groq (Narrador/Tutor Ejecutivo) es el primario, igual que socraticGuidance.
 // Si Groq alcanza SU propio rate limit (429), se hace fallback a Gemini.
 export async function askTutor(req: Request, res: Response, next: NextFunction) {

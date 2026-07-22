@@ -1,19 +1,30 @@
+"""Algoritmo de Kruskal: árbol de expansión mínima de un grafo no dirigido.
+Implementación propia (sin NetworkX), con una estructura Union-Find manual
+para detectar ciclos."""
+
 from typing import Any, Dict, List
 
 from app.algorithms.steps import StepTracker
 
 
 class _UnionFind:
+    """Estructura de conjuntos disjuntos con compresión de camino: permite saber
+    en tiempo casi constante si dos nodos ya están en el mismo componente
+    conectado (find) y unir dos componentes (union). Es lo que usa Kruskal para
+    detectar si agregar una arista formaría un ciclo."""
+
     def __init__(self, items: List[str]):
         self.parent = {x: x for x in items}
 
     def find(self, x: str) -> str:
         while self.parent[x] != x:
-            self.parent[x] = self.parent[self.parent[x]]
+            self.parent[x] = self.parent[self.parent[x]]  # compresión de camino
             x = self.parent[x]
         return x
 
     def union(self, a: str, b: str) -> bool:
+        """Une los componentes de a y b. Devuelve False si ya estaban en el mismo
+        componente (es decir, unirlos formaría un ciclo)."""
         ra, rb = self.find(a), self.find(b)
         if ra == rb:
             return False
@@ -25,6 +36,8 @@ def kruskal(nodes: List[str], edges: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Árbol de expansión mínima con el algoritmo de Kruskal (grafo no dirigido), registrando
     cada arista evaluada y si se acepta o se rechaza por formar un ciclo."""
     tracker = StepTracker()
+    # Estrategia voraz: se evalúan las aristas de menor a mayor peso, aceptando
+    # siempre la más barata que no cierre un ciclo (esto garantiza el óptimo).
     ordered = sorted(edges, key=lambda e: e.get("weight", 1.0))
     uf = _UnionFind(nodes)
 
@@ -40,6 +53,8 @@ def kruskal(nodes: List[str], edges: List[Dict[str, Any]]) -> Dict[str, Any]:
     for e in ordered:
         u, v, w = e["source"], e["target"], e.get("weight", 1.0)
         if uf.union(u, v):
+            # u y v estaban en componentes distintas: agregar esta arista conecta
+            # dos "islas" sin cerrar ningún ciclo, así que se acepta.
             mst_edges.append({"source": u, "target": v, "weight": w})
             total_weight += w
             tracker.add(
@@ -49,6 +64,8 @@ def kruskal(nodes: List[str], edges: List[Dict[str, Any]]) -> Dict[str, Any]:
                 {"accepted": True, "mst_so_far": list(mst_edges), "total_weight": round(total_weight, 4)},
             )
         else:
+            # u y v ya estaban conectados por otro camino dentro del árbol parcial:
+            # agregar esta arista formaría un ciclo, así que se descarta.
             tracker.add(
                 f"Rechazar arista ({u}, {v})",
                 f"{u} y {v} ya están conectados dentro del árbol parcial; agregarla formaría un "
@@ -56,7 +73,7 @@ def kruskal(nodes: List[str], edges: List[Dict[str, Any]]) -> Dict[str, Any]:
                 {"accepted": False},
             )
         if len(mst_edges) == len(nodes) - 1:
-            break
+            break  # un árbol de expansión de n nodos siempre tiene exactamente n-1 aristas
 
     connected = len(mst_edges) == len(nodes) - 1
     return {

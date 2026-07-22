@@ -1,3 +1,8 @@
+/**
+ * Punto de entrada del backend: conecta las bases de datos primero y solo
+ * después empieza a escuchar peticiones HTTP (así se evita aceptar tráfico
+ * antes de que Postgres/MongoDB estén disponibles).
+ */
 import app from './app';
 import { connectDatabases } from './config/db';
 import * as dotenv from 'dotenv';
@@ -20,4 +25,3 @@ startServer().catch((error) => {
   console.error('❌ Failed to start server:', error);
   process.exit(1);
 });
-

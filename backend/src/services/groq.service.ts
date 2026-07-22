@@ -1,3 +1,15 @@
+/**
+ * Cliente de la API de Groq (modelo `llama-3.3-70b-versatile`), usado como
+ * proveedor PRIMARIO para 3 de los 4 roles del tutor de IA: Resolutor
+ * (interpretProblem), Narrador (generateSocraticResponse) y Tutor Socrático
+ * (socraticGuidance) — los tres se llaman en cada turno del chat, por eso usan
+ * el proveedor de mayor cuota gratuita. También expone validateSolution como
+ * respaldo del Validador (cuyo primario es Gemini, ver gemini.service.ts).
+ *
+ * Los system prompts (VALIDATE_SYSTEM_PROMPT, SOCRATIC_*, INTERPRET_SYSTEM_PROMPT)
+ * se exportan porque gemini.service.ts los reutiliza tal cual — ambos
+ * proveedores deben comportarse igual, solo cambia el modelo que ejecuta el prompt.
+ */
 import Groq, { APIError } from "groq-sdk";
 
 /** Convierte un error de la API Groq en un mensaje legible para el usuario final. */
@@ -22,6 +34,9 @@ function isGroqQuotaError(error: unknown): boolean {
 }
 import { RagService } from "./rag.service";
 
+// Prompt del LLM #2 (Validador independiente): le pide recalcular la
+// aritmética por su cuenta y contrastarla contra el enunciado original, en
+// vez de solo confiar en el resultado que ya calculó el solver.
 export const VALIDATE_SYSTEM_PROMPT = `
 Eres el "Validador Matemático Independiente" de un tutor de Investigación Operativa. Tu trabajo es
 auditar, con ojo crítico y escéptico, el trabajo de OTRO modelo de IA (el "Resolutor") que ya
@@ -70,6 +85,8 @@ si todo es correcto pero hay algo ambiguo o que el estudiante debería revisar. 
 cuadra. Sé estricto: si algo no cuadra numéricamente, repórtalo aunque sea una diferencia pequeña.
 `;
 
+// Foco temático del modo socrático por módulo: qué debe descubrir el
+// estudiante por sí mismo antes de que se le muestre el modelo/solución.
 export const SOCRATIC_MODULE_FOCUS: Record<string, string> = {
   lp: "identificar las variables de decisión, plantear correctamente la función objetivo (maximizar o minimizar qué) y derivar cada restricción (qué recurso limita, con qué operador y qué cantidad disponible), terminando en no negatividad.",
   ip: "lo mismo que Programación Lineal, pero además distinguir cuáles variables deben ser enteras o binarias y por qué (ej. no se puede abrir media sucursal, no se puede comprar medio camión).",
@@ -79,6 +96,9 @@ export const SOCRATIC_MODULE_FOCUS: Record<string, string> = {
   inventories: "identificar la demanda, el costo de ordenar y el costo de mantener inventario, y qué supuestos del modelo EOQ (o su variante) se cumplen o no en este caso.",
 };
 
+// Prompt base del modo socrático (LLM #3, modo guía): nunca resuelve, solo
+// hace preguntas orientadoras. SOCRATIC_MODULE_FOCUS se le concatena según
+// el módulo activo antes de usarlo.
 export const SOCRATIC_SYSTEM_PROMPT_BASE = `
 Eres un tutor SOCRÁTICO de Investigación Operativa. Tu única forma de enseñar es haciendo preguntas
 que guíen al estudiante a razonar por sí mismo — NUNCA le entregas el modelo matemático completo,
@@ -95,6 +115,10 @@ Reglas estrictas:
 6. Usa un tono cercano y alentador, como un profesor ayudante, no como un examinador.
 `;
 
+// Prompt del LLM #1 (Resolutor): clasifica el enunciado en uno de los 6
+// módulos y construye el JSON de parámetros exacto que ese módulo espera.
+// También detecta si el mensaje es una edición incremental de un modelo ya
+// cargado (en vez de un problema nuevo desde cero).
 export const INTERPRET_SYSTEM_PROMPT = `
 Eres el módulo "Resolutor" de un tutor socrático de Investigación Operativa. Tu única tarea es
 leer un enunciado de problema en lenguaje natural (español), decidir cuál de los 6 módulos de la
@@ -200,6 +224,8 @@ modelo actual e interpreta desde cero como siempre.
 `;
 
 export class GroqService {
+  // LLM #1 (Resolutor). Si `currentModel` viene informado, se antepone al
+  // mensaje para que el prompt pueda detectar una edición incremental.
   static async interpretProblem(
     userMessage: string,
     currentModel?: { moduleType: string; data?: any }
@@ -222,9 +248,9 @@ export class GroqService {
           { role: 'user', content: userContent }
         ],
         model: "llama-3.3-70b-versatile",
-        temperature: 0.1,
+        temperature: 0.1, // baja temperatura: se necesita un JSON preciso, no creatividad
         max_tokens: 2000,
-        response_format: { type: "json_object" }
+        response_format: { type: "json_object" } // modo JSON estricto de Groq
       });
     } catch (err) {
       // Si es rate limit, relanza para que el controlador haga fallback a Gemini.
@@ -256,6 +282,8 @@ export class GroqService {
     return parsed;
   }
 
+  // LLM #2 (Validador), usado aquí solo como RESPALDO de Gemini (ver
+  // tutor.controller.ts: Gemini es el primario para este rol).
   static async validateSolution(
     originalMessage: string,
     moduleType: string,
@@ -319,6 +347,7 @@ ${JSON.stringify(solvedSolution, null, 2)}
     return parsed;
   }
 
+  // LLM #3, modo guía (modo socrático): nunca resuelve, solo hace preguntas.
   static async socraticGuidance(
     activeModule: string,
     userMessage: string,
@@ -333,6 +362,7 @@ ${JSON.stringify(solvedSolution, null, 2)}
     const focus = SOCRATIC_MODULE_FOCUS[activeModule] || SOCRATIC_MODULE_FOCUS['lp'];
     const systemPrompt = `${SOCRATIC_SYSTEM_PROMPT_BASE}\n\nMódulo activo: ${activeModule}. En este módulo, tu meta es ayudar al estudiante a ${focus}`;
 
+    // El chat de la UI usa role "model" para el asistente; Groq espera "assistant".
     const formattedHistory = chatHistory.map(msg => ({
       role: msg.role === 'model' ? 'assistant' : 'user',
       content: msg.text
@@ -349,7 +379,7 @@ ${JSON.stringify(solvedSolution, null, 2)}
       chatCompletion = await groq.chat.completions.create({
         messages,
         model: "llama-3.3-70b-versatile",
-        temperature: 0.7,
+        temperature: 0.7, // más alta: se busca variedad en las preguntas, no un JSON exacto
         max_tokens: 500,
       });
     } catch (err) {
@@ -360,6 +390,9 @@ ${JSON.stringify(solvedSolution, null, 2)}
     return chatCompletion.choices[0]?.message?.content || "¿Puedes contarme más sobre el problema que quieres resolver?";
   }
 
+  // LLM #3, modo narrador (modo directo): traduce la solución ya calculada a
+  // lenguaje de negocio, opcionalmente enriquecido con contexto de PDFs
+  // subidos por el usuario (RAG, ver rag.service.ts).
   static async generateSocraticResponse(
     problemContext: string,
     mathematicalSolution: any,
@@ -373,7 +406,8 @@ ${JSON.stringify(solvedSolution, null, 2)}
 
     const groq = new Groq({ apiKey });
 
-    // RAG Search
+    // Búsqueda RAG: si el usuario subió algún PDF, se agregan al prompt los
+    // fragmentos más relevantes para la pregunta actual.
     let ragContext = "";
     if (RagService.hasDocuments()) {
       const relevantChunks = await RagService.search(userMessage, 3);

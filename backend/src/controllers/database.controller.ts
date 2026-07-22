@@ -1,3 +1,9 @@
+/**
+ * Persistencia de ejercicios (OptimizationModel) y sus soluciones (Solution)
+ * en PostgreSQL vía Prisma. Es el corazón del "Historial": cada resolución
+ * (desde el chat o desde el botón "Resolver") crea un ejercicio nuevo, nunca
+ * sobreescribe uno anterior.
+ */
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/db';
 import { SolverClientService } from '../services/solver-client.service';
@@ -11,6 +17,9 @@ async function dispatchSolver(type: string, data: any): Promise<any> {
   } else if (type === 'TRANSPORT') {
     return SolverClientService.solveTransport(data);
   } else if (type === 'NETWORKS') {
+    // Compatibilidad con nombres de campo alternativos que puede generar el
+    // LLM de interpretación (from/to/cost) vs. los que espera el solver
+    // (source/target/weight).
     const mappedData = {
       ...data,
       algorithm: data.algorithm ?? 'min_cost_flow',
@@ -30,6 +39,8 @@ async function dispatchSolver(type: string, data: any): Promise<any> {
   } else if (type === 'DYNAMIC') {
     return SolverClientService.solveDynamic(data);
   } else if (type === 'INVENTORIES') {
+    // Compatibilidad con un formato antiguo/plano (demandRate/setupCost/...)
+    // que a veces genera el LLM en vez del formato real {calc_type, parameters}.
     let mappedData = data;
     if (!data.calc_type && (data.demandRate !== undefined || data.sku !== undefined)) {
       mappedData = {
@@ -76,6 +87,8 @@ export async function createModel(req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ status: 'error', message: 'type y data son requeridos' });
     }
 
+    // Todo ejercicio cuelga de un Project; se usa el primero (la app solo
+    // maneja un proyecto activo, sembrado automáticamente al arrancar).
     const project = await prisma.project.findFirst();
     if (!project) {
       return res.status(500).json({ status: 'error', message: 'No hay ningún proyecto configurado en la base de datos.' });
@@ -86,6 +99,7 @@ export async function createModel(req: Request, res: Response, next: NextFunctio
     });
 
     if (!solve) {
+      // Modo socrático: se guarda el ejercicio tal cual, sin llamar al solver.
       const created = await prisma.optimizationModel.findUnique({
         where: { id: model.id },
         include: { solutions: true }
@@ -95,8 +109,14 @@ export async function createModel(req: Request, res: Response, next: NextFunctio
 
     const solutionResult = await dispatchSolver(type, data);
 
+    // Cada solver devuelve el resultado con nombres de campo distintos
+    // (variables/allocations/decisions/result.flows/...); estas líneas
+    // normalizan esas variantes a las columnas fijas de la tabla Solution.
     const variables = solutionResult.variables ?? solutionResult.allocations ?? solutionResult.result?.flows ?? solutionResult.result?.decisions ?? solutionResult.decisions ?? (solutionResult.result ? [solutionResult.result] : []);
     const objectiveValue = solutionResult.objective_value ?? solutionResult.total_cost ?? solutionResult.result?.total_cost ?? solutionResult.optimal_value ?? solutionResult.objectiveValue ?? null;
+    // rawResponse guarda la respuesta COMPLETA y sin modificar del solver
+    // (incluye steps, comparisons, análisis de sensibilidad, etc.) para que
+    // unpackSolution pueda devolverla tal cual al frontend más adelante.
     const constraints = {
       ...(solutionResult.constraints ?? solutionResult.details ?? {}),
       rawResponse: solutionResult
@@ -123,6 +143,9 @@ export async function createModel(req: Request, res: Response, next: NextFunctio
   }
 }
 
+// Devuelve TODO el historial de ejercicios (no solo el último por módulo),
+// cada uno con su solución más reciente. Es lo que alimenta el panel
+// "Historial" del frontend.
 export async function getModels(req: Request, res: Response, next: NextFunction) {
   try {
     const models = await prisma.optimizationModel.findMany({

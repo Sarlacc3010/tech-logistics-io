@@ -1,3 +1,12 @@
+/**
+ * Genera el "Anexo de Interacción con IA" que exige la rúbrica: una tabla de
+ * 8 columnas (fecha, herramienta, objetivo, prompt, respuesta, análisis
+ * crítico, corrección, validación) a partir de los logs de auditoría — tanto
+ * el log plano en archivo (interpret/validate/socratic) como el historial
+ * completo de conversación en MongoDB (ask/narrador). Se puede pedir en JSON,
+ * CSV o PDF, y filtrado por un `modelId` puntual (un solo ejercicio) o para
+ * todo el historial.
+ */
 import { Request, Response, NextFunction } from 'express';
 import { AuditRepository } from '../repositories/audit.repository';
 import IAInteraction from '../models/ia-interaction.model';
@@ -12,6 +21,7 @@ const MODULE_LABELS: Record<string, string> = {
   INVENTORIES: 'Inventarios',
 };
 
+// Devuelve el log de auditoría crudo (sin transformar al formato del Anexo).
 export async function getAuditLogs(req: Request, res: Response, next: NextFunction) {
   try {
     const logs = await AuditRepository.findAll();
@@ -42,15 +52,21 @@ interface AnexoRow {
   validacion: string;
 }
 
+// Recorta valores muy largos (o los serializa si no son string) para que el
+// Anexo no quede ilegible con prompts/respuestas gigantes.
 function truncate(value: any, max = 2000): string {
   const s = typeof value === 'string' ? value : JSON.stringify(value ?? '');
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
+// Une las dos fuentes de auditoría (log de archivo + MongoDB) en una sola
+// lista de filas del Anexo, opcionalmente filtrada por `modelId` (un solo
+// ejercicio en vez de todo el historial).
 async function buildAnexoRows(modelId?: string): Promise<AnexoRow[]> {
   const fileLogs = await AuditRepository.findAll();
   const rows: AnexoRow[] = [];
 
+  // Fuente 1: log de archivo (interpret/validate/socratic), un registro por llamada.
   for (const log of fileLogs) {
     if (!log.type.startsWith('groq_tutor')) continue;
     if (modelId && log.modelId !== modelId) continue;
@@ -61,6 +77,7 @@ async function buildAnexoRows(modelId?: string): Promise<AnexoRow[]> {
     let respuesta = '';
     let validacion = '';
 
+    // El prompt/respuesta relevante depende del tipo de interacción.
     if (log.type === 'groq_tutor_interpret') {
       prompt = body.userMessage || '';
       respuesta = response.isNewProblem
@@ -80,6 +97,8 @@ async function buildAnexoRows(modelId?: string): Promise<AnexoRow[]> {
 
     let herramienta = 'Groq API — Llama 3.3 70B Versatile';
     if (log.type === 'groq_tutor_validate') {
+      // La validación puede haber usado Gemini (normal) o Groq (si Gemini
+      // agotó su cuota); se refleja cuál fue en la columna "Herramienta".
       herramienta = response.validatedBy === 'groq_fallback'
         ? 'Groq API — Llama 3.3 70B Versatile (respaldo, Gemini no disponible)'
         : 'Google Gemini 2.5 Flash';
@@ -97,6 +116,8 @@ async function buildAnexoRows(modelId?: string): Promise<AnexoRow[]> {
     });
   }
 
+  // Fuente 2: historial de conversación completo en MongoDB (endpoint /tutor/ask,
+  // el "Narrador"), un registro por interacción de chat.
   try {
     const mongoFilter = modelId ? { modelId } : {};
     const docs = await IAInteraction.find(mongoFilter).sort({ createdAt: -1 }).limit(500);
@@ -119,9 +140,11 @@ async function buildAnexoRows(modelId?: string): Promise<AnexoRow[]> {
     // MongoDB puede no estar disponible; el anexo igual se arma con los logs de archivo.
   }
 
+  // Más reciente primero
   return rows.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 }
 
+// Serializa las filas del Anexo como CSV (para abrir en Excel).
 function toCsv(rows: AnexoRow[]): string {
   const headers = ['Fecha', 'Herramienta', 'Objetivo de la consulta', 'Prompt ingresado', 'Respuesta relevante', 'Análisis crítico', 'Corrección o mejora', 'Validación'];
   const escape = (v: string) => `"${(v || '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
@@ -132,6 +155,9 @@ function toCsv(rows: AnexoRow[]): string {
   return lines.join('\r\n');
 }
 
+// Genera el Anexo como PDF, en formato de ficha (una interacción tras otra,
+// con espacio en blanco para que el estudiante complete a mano el "análisis
+// crítico" y la "corrección o mejora" que pide la rúbrica).
 function generatePdfBuffer(rows: AnexoRow[], subtitle?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 45, size: 'A4', bufferPages: true });
@@ -163,7 +189,7 @@ function generatePdfBuffer(rows: AnexoRow[], subtitle?: string): Promise<Buffer>
     };
 
     rows.forEach((r, i) => {
-      if (doc.y > 650) doc.addPage();
+      if (doc.y > 650) doc.addPage(); // salto de página manual antes de quedarse sin espacio
       doc.moveTo(doc.x, doc.y).lineTo(550, doc.y).strokeColor('#DDDDDD').stroke();
       doc.moveDown(0.4);
       doc.font('Helvetica-Bold').fontSize(11).fillColor('#1345A8').text(`Interacción ${i + 1}`);
@@ -185,11 +211,16 @@ function generatePdfBuffer(rows: AnexoRow[], subtitle?: string): Promise<Buffer>
   });
 }
 
+// GET /api/audit/annex — endpoint principal. ?modelId=X filtra a un solo
+// ejercicio (lo que usa el panel "Historial"); ?format=csv o ?format=pdf
+// cambia el tipo de respuesta, si no se pasa devuelve JSON.
 export async function getInteractionAnnex(req: Request, res: Response, next: NextFunction) {
   try {
     const modelId = typeof req.query.modelId === 'string' ? req.query.modelId : undefined;
     const rows = await buildAnexoRows(modelId);
 
+    // Si se filtra por un ejercicio puntual, se busca su tipo/fecha para
+    // ponerlos como subtítulo del PDF y como sufijo del nombre de archivo.
     let subtitle: string | undefined;
     let filenameSuffix = '';
     if (modelId) {
@@ -205,6 +236,8 @@ export async function getInteractionAnnex(req: Request, res: Response, next: Nex
       const csv = toCsv(rows);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="anexo_interaccion_ia${filenameSuffix}.csv"`);
+      // El BOM (﻿) al inicio hace que Excel detecte UTF-8 correctamente
+      // (si no, los acentos/ñ se ven mal al abrir el CSV en Windows).
       return res.status(200).send('﻿' + csv);
     }
 

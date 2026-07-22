@@ -1,3 +1,13 @@
+"""Método MODI (Modified Distribution / multiplicadores u-v): optimiza una
+solución inicial de transporte (generada por Noroeste, Costo Mínimo o Vogel)
+hasta que ya no exista ninguna reasignación que reduzca el costo total.
+
+Es el algoritmo que genera el detalle "paso a paso" del módulo de Transporte
+que se muestra en el frontend. La respuesta numérica *oficial* (asignaciones y
+costo total que ve el usuario) la recalcula por separado transport_router.py
+con PuLP, por robustez ante casos degenerados; MODI converge matemáticamente
+al mismo óptimo."""
+
 from collections import Counter
 from typing import Any, Dict, List
 
@@ -10,6 +20,9 @@ MAX_ITERATIONS = 200
 
 
 def _basic_cells_from_allocations(allocations, origin_idx, dest_idx) -> Dict[tuple, float]:
+    """Convierte la lista de asignaciones {origin, destination, units} de la
+    solución inicial en un diccionario {(fila, columna): unidades} indexado por
+    posición numérica en la matriz, que es como MODI trabaja internamente."""
     cells = {}
     for a in allocations:
         i, j = origin_idx[a["origin"]], dest_idx[a["destination"]]
@@ -21,18 +34,21 @@ def _ensure_spanning_basis(basic: Dict[tuple, float], costs: np.ndarray, m: int,
     """Garantiza m+n-1 celdas básicas conectadas (árbol de expansión sobre el grafo bipartito
     orígenes-destinos). Si la solución inicial es degenerada, agrega celdas con asignación 0
     en las de menor costo que conecten componentes separadas."""
+    # Union-Find sobre m+n "nodos": los índices 0..m-1 son orígenes, m..m+n-1 son
+    # destinos. Dos celdas básicas conectan su origen y su destino en el mismo
+    # árbol; MODI necesita que ese árbol sea conexo y tenga exactamente m+n-1 aristas.
     parent = list(range(m + n))
 
     def find(x):
         while parent[x] != x:
-            parent[x] = parent[parent[x]]
+            parent[x] = parent[parent[x]]  # compresión de camino
             x = parent[x]
         return x
 
     def union(a, b):
         ra, rb = find(a), find(b)
         if ra == rb:
-            return False
+            return False  # ya estaban conectados: agregarla formaría un ciclo
         parent[ra] = rb
         return True
 
@@ -42,6 +58,8 @@ def _ensure_spanning_basis(basic: Dict[tuple, float], costs: np.ndarray, m: int,
     if len(basic) >= m + n - 1:
         return basic
 
+    # Faltan celdas básicas (degeneración): se completan con las de menor costo
+    # que sí conecten componentes distintas, en orden de costo ascendente.
     candidates = sorted(
         ((costs[i][j], i, j) for i in range(m) for j in range(n) if (i, j) not in basic),
         key=lambda x: x[0],
@@ -50,12 +68,17 @@ def _ensure_spanning_basis(basic: Dict[tuple, float], costs: np.ndarray, m: int,
         if len(basic) == m + n - 1:
             break
         if union(i, m + j):
-            basic[(i, j)] = 0.0
+            basic[(i, j)] = 0.0  # celda básica "degenerada": está en la base pero con 0 unidades
 
     return basic
 
 
 def _compute_uv(basic: Dict[tuple, float], costs: np.ndarray, m: int, n: int):
+    """Calcula los multiplicadores uᵢ (por origen) y vⱼ (por destino) resolviendo
+    el sistema uᵢ + vⱼ = cᵢⱼ sobre las celdas básicas, fijando u₀ = 0 como
+    referencia (el sistema tiene un grado de libertad). Se propaga por el árbol
+    de celdas básicas: cada vez que se conoce uno de los dos valores de una celda
+    básica, se despeja el otro."""
     u = [None] * m
     v = [None] * n
     u[0] = 0.0
@@ -73,6 +96,10 @@ def _compute_uv(basic: Dict[tuple, float], costs: np.ndarray, m: int, n: int):
 
 
 def _find_loop(basic_cells: Dict[tuple, float], entering: tuple):
+    """Encuentra el conjunto de celdas que forman el único ciclo cerrado que se crea
+    al agregar `entering` a las celdas básicas. Se hace "podando" repetidamente las
+    celdas que no pueden formar parte de un ciclo (su fila o columna tiene menos de
+    2 celdas candidatas) hasta que solo queda el ciclo en sí."""
     cells = set(basic_cells) | {entering}
     changed = True
     while changed:
@@ -87,6 +114,10 @@ def _find_loop(basic_cells: Dict[tuple, float], entering: tuple):
 
 
 def _order_loop(cells: set, start: tuple) -> List[tuple]:
+    """Ordena las celdas del ciclo encontrado por `_find_loop` en una secuencia
+    recorrible: alternando movimientos por fila y por columna a partir de `start`,
+    de forma que el resultado sea el orden real en que se "camina" el ciclo (necesario
+    para saber qué celdas suman y cuáles restan al transferir unidades)."""
     path = [start]
     visited = {start}
     current = start
@@ -139,6 +170,8 @@ def modi_optimize(
 
     for iteration in range(MAX_ITERATIONS):
         u, v = _compute_uv(basic, costs_arr, m, n)
+        # Costo reducido de cada celda no básica: cuánto cambiaría el costo total
+        # por cada unidad que se mueva a esa celda. Si es negativo, conviene usarla.
         reduced_costs = {
             (i, j): costs_arr[i][j] - (u[i] + v[j])
             for i in range(m)
@@ -165,6 +198,7 @@ def modi_optimize(
             )
             break
 
+        # Entra la celda con el costo reducido más negativo (mayor ahorro potencial).
         entering = min(negative, key=negative.get)
         tracker.add(
             f"MODI iteración {iteration + 1}: multiplicadores y celda entrante",
@@ -176,15 +210,21 @@ def modi_optimize(
 
         loop_cells = _find_loop(basic, entering)
         path = _order_loop(loop_cells, entering)
+        # Las celdas en posición impar del ciclo son las que "restan" unidades
+        # (theta es el mínimo de esas, para no dejar ninguna en negativo).
         minus_cells = path[1::2]
 
         theta = min(basic.get(c, 0.0) for c in minus_cells)
+        # Si hay empate en el mínimo, se elige de forma determinista (celda más
+        # "pequeña" por orden de tupla) para que el algoritmo sea reproducible.
         leaving = min((c for c in minus_cells if abs(basic.get(c, 0.0) - theta) < EPS), key=lambda c: c)
 
+        # Recorre el ciclo transfiriendo theta unidades: suma en las celdas pares
+        # (incluida la entrante) y resta en las impares.
         for idx, cell in enumerate(path):
             sign = 1 if idx % 2 == 0 else -1
             basic[cell] = basic.get(cell, 0.0) + sign * theta
-        del basic[leaving]
+        del basic[leaving]  # la celda que llegó a 0 sale de la base
 
         tracker.add(
             f"MODI iteración {iteration + 1}: ciclo de ajuste",
@@ -200,6 +240,8 @@ def modi_optimize(
     else:
         raise RuntimeError("MODI no convergió dentro del número máximo de iteraciones")
 
+    # Arma la lista final de asignaciones (se descartan las celdas básicas con 0
+    # unidades, que solo existían para completar el árbol de expansión).
     allocations = []
     total_cost = 0.0
     for (i, j), qty in basic.items():

@@ -1,3 +1,10 @@
+/**
+ * Formulario manual del módulo de Redes: selector de algoritmo (ruta más
+ * corta, árbol de expansión mínima, flujo máximo, flujo de costo mínimo),
+ * tabla de nodos (con oferta/demanda solo si aplica) y tabla de arcos (con
+ * peso/capacidad solo si aplica), ambas condicionadas al algoritmo elegido.
+ * Si el JSON no tiene la forma esperada, cae a un textarea de JSON crudo.
+ */
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, AlertCircle } from 'lucide-react';
 

@@ -1,3 +1,12 @@
+"""Endpoint de Programación Lineal y Programación Lineal Entera (`POST /lp/solve`).
+
+Usa un motor doble: PuLP + CBC calcula la respuesta *oficial* (valor objetivo,
+variables, análisis de sensibilidad) porque maneja de forma robusta variables
+enteras (Branch & Bound) y casos degenerados; el motor propio de simplex.py
+genera en paralelo el detalle "paso a paso" (Simplex/Dos Fases/Gran M) para
+mostrarlo en el frontend, cuando el modelo lo permite (solo variables
+continuas, sin cotas)."""
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any
@@ -15,7 +24,7 @@ class VariableInput(BaseModel):
     name: str
     lowBound: Optional[float] = 0.0
     upBound: Optional[float] = None
-    isInteger: bool = False
+    isInteger: bool = False  # true => Programación Entera (Branch & Bound vía CBC)
     objCoef: float
 
 class ConstraintInput(BaseModel):
@@ -68,11 +77,15 @@ def solve_lp_helper(
     variables: List[VariableInput],
     constraints: List[ConstraintInput]
 ) -> tuple:
-    # Determine objective type
+    """Arma el modelo en PuLP (variables, función objetivo, restricciones) y lo
+    resuelve con el solver CBC. Devuelve el problema resuelto y los diccionarios
+    de variables/restricciones indexados por nombre original, para poder leer
+    los resultados después."""
+    # Determina si es maximizar o minimizar
     sense = pulp.LpMaximize if objective_str.lower() == "maximize" else pulp.LpMinimize
     prob = pulp.LpProblem("TechLogistics_LP", sense)
 
-    # Create variables
+    # Crea las variables de decisión (continua o entera según isInteger)
     pulp_vars = {}
     for v in variables:
         cat = pulp.LpInteger if v.isInteger else pulp.LpContinuous
@@ -83,10 +96,10 @@ def solve_lp_helper(
             cat=cat
         )
 
-    # Objective function
+    # Función objetivo: suma de coef * variable
     prob += pulp.lpSum([v.objCoef * pulp_vars[v.name] for v in variables])
 
-    # Constraints
+    # Restricciones
     pulp_constrs = {}
     for c in constraints:
         expr = pulp.lpSum([coef * pulp_vars[var_name] for var_name, coef in c.coefficients.items() if var_name in pulp_vars])
@@ -102,12 +115,11 @@ def solve_lp_helper(
         safe_cname = _pulp_safe_name(c.name, "c")
         prob += constr_obj, safe_cname
         pulp_constrs[c.name] = prob.constraints[safe_cname]
-        
-    # Solve the problem
-    # Using default solver (CBC) and quiet mode
+
+    # Resuelve el problema con el solver CBC en modo silencioso (sin logs a consola)
     solver = pulp.PULP_CBC_CMD(msg=False)
     status = prob.solve(solver)
-    
+
     status_str = pulp.LpStatus[status]
     return prob, pulp_vars, pulp_constrs, status_str
 
@@ -117,42 +129,45 @@ def solve_lp(payload: LPProblemInput):
         prob, pulp_vars, pulp_constrs, status_str = solve_lp_helper(
             payload.objective, payload.variables, payload.constraints
         )
-        
+
         if status_str != "Optimal":
-            # Return variables with 0 and status if not optimal
+            # Infactible/no acotado: se devuelven las variables en 0 en vez de fallar,
+            # para que el frontend pueda mostrar el status igual.
             return LPSolutionOutput(
                 status=status_str,
                 objective_value=None,
                 variables=[VariableOutput(name=v.name, value=0.0, reduced_cost=0.0) for v in payload.variables],
                 constraints=[ConstraintOutput(name=c.name, slack=0.0, shadow_price=0.0) for c in payload.constraints]
             )
-            
+
         obj_val = pulp.value(prob.objective)
-        
-        # Build variable results
+
+        # Arma los resultados de variables (valor + costo reducido)
         var_results = []
         for v in payload.variables:
             pv = pulp_vars[v.name]
             val = pv.varValue if pv.varValue is not None else 0.0
-            # Reduced cost (dj) is available in continuous optimization
+            # El costo reducido (dj) solo está disponible en optimización continua
             rc = pv.dj if pv.dj is not None else 0.0
             var_results.append(VariableOutput(name=v.name, value=val, reduced_cost=rc))
-            
-        # Build constraint results and compute sensitivity ranges
+
+        # Arma los resultados de restricciones y calcula rangos de sensibilidad
         constr_results = []
         for c in payload.constraints:
             pc = pulp_constrs[c.name]
             slack = pc.slack if pc.slack is not None else 0.0
             shadow_price = pc.pi if pc.pi is not None else 0.0
-            
-            # Simple sensitivity analysis:
-            # If constraint is non-binding (shadow_price == 0), the RHS can go down by the slack, and up to infinity.
-            # If binding (shadow_price != 0), we find ranges by perturbing RHS and resolving.
+
+            # Análisis de sensibilidad simplificado:
+            # Si la restricción no está activa (precio sombra == 0), el RHS puede bajar
+            # hasta donde llegue la holgura, y subir sin límite.
+            # Si está activa (precio sombra != 0), se buscan los rangos perturbando
+            # el RHS y resolviendo de nuevo.
             rhs_low = None
             rhs_high = None
-            
+
             if abs(shadow_price) < 1e-6:
-                # Non-binding constraint
+                # Restricción no activa (holgura > 0): no limita la solución actual
                 if c.operator == "<=":
                     rhs_low = c.rhs - slack
                     rhs_high = float("inf")
@@ -160,23 +175,24 @@ def solve_lp(payload: LPProblemInput):
                     rhs_low = float("-inf")
                     rhs_high = c.rhs + slack
             else:
-                # Binding constraint: perform numeric ranging by resolving with perturbed RHS
-                # We perturb RHS by steps to find where shadow price changes or problem becomes infeasible
+                # Restricción activa: se calcula el rango factible re-resolviendo con
+                # el RHS desplazado paso a paso hasta que el precio sombra cambia o el
+                # problema se vuelve infactible (método numérico, no la fórmula analítica).
                 original_rhs = c.rhs
-                
-                # Allowable Decrease (rhsLow)
+
+                # Disminución permitida (rhsLow)
                 step = max(abs(original_rhs) * 0.05, 0.5)
                 current_rhs = original_rhs
                 for _ in range(20):
                     current_rhs -= step
-                    # Resolve LP with new RHS
-                    # Modify constraints directly in pulp
+                    # Se modifica el RHS directamente en PuLP y se vuelve a resolver
                     pc.changeRHS(current_rhs)
-                    # Resolve
+                    # Resuelve de nuevo con una copia del problema (no altera el original)
                     temp_prob = copy.deepcopy(prob)
                     solver = pulp.PULP_CBC_CMD(msg=False)
                     temp_status = temp_prob.solve(solver)
-                    # If status changes or shadow price of this constraint changes significantly, stop
+                    # Si el status cambia o el precio sombra de esta restricción cambia
+                    # significativamente, se llegó al límite del rango factible.
                     if pulp.LpStatus[temp_status] != "Optimal":
                         rhs_low = current_rhs + step
                         break
@@ -185,9 +201,9 @@ def solve_lp(payload: LPProblemInput):
                         rhs_low = current_rhs
                         break
                 if rhs_low is None:
-                    rhs_low = original_rhs - 100.0  # fallback
-                    
-                # Allowable Increase (rhsHigh)
+                    rhs_low = original_rhs - 100.0  # valor de respaldo si no converge
+
+                # Aumento permitido (rhsHigh), mismo procedimiento en la otra dirección
                 current_rhs = original_rhs
                 for _ in range(20):
                     current_rhs += step
@@ -203,13 +219,12 @@ def solve_lp(payload: LPProblemInput):
                         rhs_high = current_rhs
                         break
                 if rhs_high is None:
-                    rhs_high = original_rhs + 100.0  # fallback
-                
-                # Restore original RHS
+                    rhs_high = original_rhs + 100.0  # valor de respaldo si no converge
+
+                # Se restaura el RHS original en el problema base
                 pc.changeRHS(original_rhs)
-            
-            # Format infinity for JSON compatibility (replace float('inf') with None or large/string value if needed, 
-            # but standard is to return null or string, or a large number. Let's use string 'inf' or large numbers)
+
+            # Formatea infinito para que sea compatible con JSON (se usa None/null)
             constr_results.append(ConstraintOutput(
                 name=c.name,
                 slack=slack,
@@ -217,7 +232,7 @@ def solve_lp(payload: LPProblemInput):
                 rhsLow=rhs_low if (rhs_low is not None and not np.isinf(rhs_low)) else None,
                 rhsHigh=rhs_high if (rhs_high is not None and not np.isinf(rhs_high)) else None
             ))
-            
+
         method_used, steps, steps_note = _build_steps(payload)
 
         return LPSolutionOutput(
@@ -242,6 +257,8 @@ def _build_steps(payload: LPProblemInput):
     if payload.method == "none":
         return None, None, None
 
+    # El motor propio (simplex.py) no maneja variables enteras ni cotas superiores/
+    # inferiores distintas de 0, así que en esos casos se omite el detalle paso a paso.
     unsupported = any(
         v.isInteger or v.upBound is not None or (v.lowBound not in (0.0, None))
         for v in payload.variables
@@ -264,6 +281,8 @@ def _build_steps(payload: LPProblemInput):
         requested = (payload.method or "auto").lower()
         has_ge_or_eq = any(c.operator != "<=" for c in payload.constraints)
 
+        # Elige el método: si el usuario no especificó uno, se usa Simplex estándar
+        # cuando todas las restricciones son "<=", o Dos Fases si hay ">="/"=".
         if requested == "simplex" or (requested == "auto" and not has_ge_or_eq):
             result = solve_standard_simplex(payload.objective, var_names, obj_coeffs, constraints_dicts)
         elif requested == "granm":

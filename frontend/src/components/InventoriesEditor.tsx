@@ -1,3 +1,10 @@
+/**
+ * Formulario manual del módulo de Inventarios: selector de modelo (calc_type)
+ * y campos numéricos propios de cada uno (EOQ básico, con descuentos, con
+ * faltantes, EPQ, punto de reorden, ABC), con tablas editables para los
+ * niveles de precio (eoq_discounts) o los SKUs (abc). Si el JSON no tiene la
+ * forma esperada, cae a un textarea de JSON crudo como respaldo.
+ */
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Package, Plus, Trash2 } from 'lucide-react';
 

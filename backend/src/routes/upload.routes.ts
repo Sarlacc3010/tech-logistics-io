@@ -1,3 +1,8 @@
+/**
+ * Endpoint para subir un PDF desde el chat (📎) y alimentar el RAG del tutor
+ * (ver rag.service.ts). El archivo se recibe en memoria (no se guarda en
+ * disco) y se indexa inmediatamente.
+ */
 import { Router } from 'express';
 import multer from 'multer';
 import { RagService } from '../services/rag.service';
@@ -15,7 +20,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     const numChunks = await RagService.ingestPdf(req.file.buffer);
-    
+
     res.json({ message: 'Document ingested successfully for RAG', chunks: numChunks });
   } catch (error: any) {
     console.error('Error uploading PDF:', error);

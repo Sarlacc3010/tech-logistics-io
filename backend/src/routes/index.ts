@@ -1,3 +1,9 @@
+/**
+ * Registro central de rutas del backend, montado bajo /api en app.ts. Agrupa
+ * tres familias de endpoints: persistencia de ejercicios (Historial),
+ * solvers directos (sin persistir), y el tutor de IA — estos dos últimos con
+ * `auditMiddleware` para quedar registrados en el Anexo de Interacción con IA.
+ */
 import { Router } from 'express';
 import { solveLP } from '../controllers/linear-programming.controller';
 import { askTutor, interpretProblem, validateSolution, socraticGuidance } from '../controllers/tutor.controller';
