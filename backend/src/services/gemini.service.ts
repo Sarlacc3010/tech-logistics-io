@@ -1,6 +1,18 @@
+/**
+ * Cliente de la API de Google Gemini (`gemini-2.5-flash`), usado como
+ * proveedor PRIMARIO del LLM #2 (Validador independiente) — es un modelo de
+ * un proveedor genuinamente distinto a Groq, para que la validación no sea
+ * "el mismo modelo revisándose a sí mismo". También sirve de RESPALDO para
+ * los otros tres roles (interpretProblem, socraticGuidance,
+ * generateSocraticResponse) si Groq agota su cuota.
+ *
+ * Reutiliza los mismos system prompts que groq.service.ts (importados desde
+ * ahí) para que ambos proveedores se comporten igual — solo cambia qué
+ * modelo ejecuta el prompt.
+ */
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { 
-  VALIDATE_SYSTEM_PROMPT, 
+import {
+  VALIDATE_SYSTEM_PROMPT,
   INTERPRET_SYSTEM_PROMPT,
   SOCRATIC_SYSTEM_PROMPT_BASE,
   SOCRATIC_MODULE_FOCUS
@@ -43,7 +55,7 @@ export class GeminiService {
       systemInstruction: VALIDATE_SYSTEM_PROMPT,
       generationConfig: {
         temperature: 0.1,
-        responseMimeType: 'application/json',
+        responseMimeType: 'application/json', // fuerza que la respuesta sea JSON parseable
       },
     });
 
@@ -166,6 +178,7 @@ ${JSON.stringify(solvedSolution, null, 2)}
       },
     });
 
+    // La API de Gemini usa "model" (no "assistant") para el turno del asistente.
     const formattedHistory = chatHistory.map(msg => ({
       role: msg.role === 'model' ? 'model' : 'user',
       parts: [{ text: msg.text }]
@@ -202,7 +215,8 @@ ${JSON.stringify(solvedSolution, null, 2)}
     }
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    // RAG Search
+    // Búsqueda RAG: si el usuario subió algún PDF, se agregan al prompt los
+    // fragmentos más relevantes para la pregunta actual.
     let ragContext = "";
     if (RagService.hasDocuments()) {
       const relevantChunks = await RagService.search(userMessage, 3);

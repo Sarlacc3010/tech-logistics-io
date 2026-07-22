@@ -1,3 +1,11 @@
+"""Endpoint del módulo de Transporte (`POST /transport/solve`).
+
+Pipeline completo: balancea el problema, calcula las tres soluciones iniciales
+(Noroeste/Costo Mínimo/Vogel) para comparar, optimiza con MODI la elegida por
+el usuario (genera el detalle paso a paso), y por separado recalcula la
+respuesta *oficial* (asignaciones, costo total y análisis de sensibilidad) con
+PuLP, por robustez ante casos degenerados."""
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
@@ -72,36 +80,39 @@ class TransportSolutionOutput(BaseModel):
 @router.post("/solve", response_model=TransportSolutionOutput)
 def solve_transport(payload: TransportProblemInput):
     try:
-        # Validate inputs
+        # Valida que la matriz de costos tenga el tamaño esperado
         n_origins = len(payload.origins)
         n_destinations = len(payload.destinations)
         cost_matrix = np.array(payload.costs)
-        
+
         if cost_matrix.shape != (n_origins, n_destinations):
             raise HTTPException(
                 status_code=400,
                 detail=f"Costs matrix shape {cost_matrix.shape} must match origins ({n_origins}) and destinations ({n_destinations})"
             )
-            
-        # Balance the problem for initial methods
+
+        # Balancea el problema (agrega origen/destino ficticio si oferta != demanda)
+        # antes de correr los métodos de solución inicial.
         bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations = balance_transport_problem(
             payload.supply, payload.demand, payload.costs
         )
-        
-        # Calculate initial solutions
+
+        # Calcula las tres soluciones iniciales solo para comparar en la interfaz
+        # (cuál método arranca más cerca del óptimo), independiente de cuál se usa
+        # realmente para alimentar a MODI.
         comparisons = []
         try:
             res_nw = northwest_corner(bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations)
             comparisons.append(TransportMethodResult(**res_nw))
-            
+
             res_mc = min_cost(bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations)
             comparisons.append(TransportMethodResult(**res_mc))
-            
+
             res_vo = vogel(bal_supply, bal_demand, bal_costs, bal_origins, bal_destinations)
             comparisons.append(TransportMethodResult(**res_vo))
         except Exception as e:
             print(f"Warning: Failed to compute initial methods: {e}")
-            
+
         # Optimización paso a paso vía MODI, partiendo de la solución inicial elegida
         initial_key = (payload.initial_method or "vogel").lower()
         if initial_key not in INITIAL_METHODS:
@@ -119,34 +130,38 @@ def solve_transport(payload: TransportProblemInput):
         except Exception as modi_err:
             steps_note = f"No se pudo generar el detalle paso a paso de MODI: {modi_err}"
 
-        # Model transport problem in PuLP for optimal solution
+        # Se modela el mismo problema de transporte como un LP en PuLP: esta es la
+        # fuente de verdad numérica que ve el usuario (allocations/total_cost),
+        # más robusta que MODI ante casos degenerados. MODI arriba solo alimentó
+        # el panel de "steps".
         prob = pulp.LpProblem("Transportation_Problem", pulp.LpMinimize)
-        
-        # Decision variables
+
+        # Variables de decisión: unidades enviadas de cada origen a cada destino
         routes = [(i, j) for i in range(n_origins) for j in range(n_destinations)]
         vars = pulp.LpVariable.dicts("Route", (range(n_origins), range(n_destinations)), lowBound=0, cat=pulp.LpContinuous)
-        
-        # Objective
+
+        # Función objetivo: minimizar el costo total de transporte
         prob += pulp.lpSum([vars[i][j] * cost_matrix[i][j] for (i, j) in routes])
-        
-        # Supply constraints
+
+        # Restricciones de oferta: lo que sale de cada origen no puede superar su oferta
         for i in range(n_origins):
             supply_name = _pulp_safe_name(f"Supply_{payload.origins[i]}")
             prob += pulp.lpSum([vars[i][j] for j in range(n_destinations)]) <= payload.supply[i], supply_name
 
-        # Demand constraints
+        # Restricciones de demanda: lo que llega a cada destino debe cubrir su demanda
         for j in range(n_destinations):
             demand_name = _pulp_safe_name(f"Demand_{payload.destinations[j]}")
             prob += pulp.lpSum([vars[i][j] for i in range(n_origins)]) >= payload.demand[j], demand_name
-            
-        # Solve
+
+        # Resuelve con CBC
         solver = pulp.PULP_CBC_CMD(msg=False)
         status = prob.solve(solver)
-        
+
         status_str = pulp.LpStatus[status]
         if status_str != "Optimal":
             raise HTTPException(status_code=400, detail=f"Transport model could not be solved: {status_str}")
-            
+
+        # Arma la lista de asignaciones con unidades > 0
         allocations = []
         for i in range(n_origins):
             for j in range(n_destinations):
@@ -159,8 +174,8 @@ def solve_transport(payload: TransportProblemInput):
                         cost=val * cost_matrix[i][j]
                     ))
 
-        # Análisis de sensibilidad: precios sombra de oferta/demanda (pc.pi) y costo de
-        # oportunidad de las rutas no usadas (pv.dj), igual que en el módulo de LP.
+        # Análisis de sensibilidad: precios sombra de oferta/demanda (pc.pi) y
+        # costo de oportunidad de las rutas no usadas (pv.dj), igual que en el módulo de LP.
         supply_duals = []
         for i in range(n_origins):
             c = prob.constraints[_pulp_safe_name(f"Supply_{payload.origins[i]}")]
@@ -179,6 +194,9 @@ def solve_transport(payload: TransportProblemInput):
                 slack=c.slack if c.slack is not None else 0.0,
             ))
 
+        # Costo de oportunidad de las rutas NO usadas (dj): cuánto subiría el costo
+        # total si se forzara 1 unidad por esa ruta. Se ordenan de menor a mayor
+        # para mostrar primero las "menos malas" alternativas.
         opportunity_costs = []
         for i in range(n_origins):
             for j in range(n_destinations):
@@ -205,7 +223,7 @@ def solve_transport(payload: TransportProblemInput):
             opportunity_costs=opportunity_costs,
             steps_note=steps_note
         )
-        
+
     except HTTPException as he:
         raise he
     except Exception as e:

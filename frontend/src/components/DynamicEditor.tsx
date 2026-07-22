@@ -1,3 +1,10 @@
+/**
+ * Formulario manual del módulo de Programación Dinámica: selector de tipo de
+ * problema (mochila 0/1 o tamaño de lote por Wagner-Whitin) con los campos
+ * propios de cada uno (objetos peso/valor + capacidad, o demanda por período
+ * + costos). Si el JSON no tiene la forma esperada (problem_type/parameters),
+ * cae a un textarea de JSON crudo como respaldo.
+ */
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Layers, Plus, Trash2 } from 'lucide-react';
 

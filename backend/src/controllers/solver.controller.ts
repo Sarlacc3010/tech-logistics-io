@@ -1,8 +1,15 @@
+/**
+ * Endpoints "directos" del solver para Transporte, Redes, Programación
+ * Dinámica e Inventarios: validan el body con Zod y reenvían al Solver
+ * Service (Python) sin persistir nada en la base de datos. Se usan para
+ * cálculos puntuales; la persistencia real del historial pasa por
+ * database.controller.ts (POST /api/models).
+ */
 import { Request, Response, NextFunction } from 'express';
 import { SolverClientService } from '../services/solver-client.service';
 import { z } from 'zod';
 
-// Zod schemas for validation
+// Esquemas de validación con Zod, uno por módulo
 const TransportProblemSchema = z.object({
   origins: z.array(z.string()),
   destinations: z.array(z.string()),
@@ -61,10 +68,12 @@ export async function solveTransport(req: Request, res: Response, next: NextFunc
 
 export async function solveNetworks(req: Request, res: Response, next: NextFunction) {
   try {
+    // Compatibilidad con nombres de campo alternativos (from/to/cost) que
+    // puede generar el LLM de interpretación, antes de validar con Zod.
     const mappedBody = {
       ...req.body,
       algorithm: req.body.algorithm ?? 'min_cost_flow',
-      edges: Array.isArray(req.body.edges) 
+      edges: Array.isArray(req.body.edges)
         ? req.body.edges.map((e: any) => ({
             source: e.from ?? e.source,
             target: e.to ?? e.target,
@@ -119,6 +128,8 @@ export async function solveDynamic(req: Request, res: Response, next: NextFuncti
 
 export async function solveInventories(req: Request, res: Response, next: NextFunction) {
   try {
+    // Compatibilidad con un formato antiguo/plano (demandRate/setupCost/...)
+    // que a veces genera el LLM en vez del formato real {calc_type, parameters}.
     let mappedBody = req.body;
     if (!req.body.calc_type && (req.body.demandRate !== undefined || req.body.sku !== undefined)) {
       mappedBody = {

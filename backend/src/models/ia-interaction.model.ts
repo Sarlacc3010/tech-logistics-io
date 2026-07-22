@@ -1,3 +1,10 @@
+/**
+ * Esquema de Mongoose para el historial de conversación del tutor de IA
+ * (endpoint /tutor/ask, el "Narrador"), guardado en MongoDB. Cada documento
+ * es una interacción completa con su historial de chat; `modelId` permite
+ * filtrar por el ejercicio al que pertenece (usado por el Anexo IA por
+ * ejercicio, ver audit.controller.ts).
+ */
 import { Schema, model, Document } from 'mongoose';
 
 export interface IChatMessage {

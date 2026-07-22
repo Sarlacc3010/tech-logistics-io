@@ -1,3 +1,8 @@
+"""Método del Costo Mínimo: genera una solución inicial factible para el problema
+de transporte asignando siempre en la celda más barata disponible (mejor punto
+de partida que Noroeste, aunque no tan bueno como Vogel). Sirve como una de las
+tres opciones de solución inicial para MODI (modi.py)."""
+
 import numpy as np
 
 def min_cost(supply: np.ndarray, demand: np.ndarray, costs: np.ndarray, origins: list[str], destinations: list[str]):
@@ -7,25 +12,25 @@ def min_cost(supply: np.ndarray, demand: np.ndarray, costs: np.ndarray, origins:
     """
     supply = supply.copy()
     demand = demand.copy()
-    
-    # Use a masked array or a copy to cross out processed rows/cols by setting costs to infinity
+
+    # Se usa una copia de la matriz de costos donde se "tachan" filas/columnas
+    # ya saturadas poniéndolas en infinito, para que argmin nunca las vuelva a elegir.
     costs_temp = costs.copy()
-    
+
     allocations = []
     total_cost = 0.0
-    
+
     while np.sum(supply) > 0 and np.sum(demand) > 0:
-        # Find indices of the minimum cost
-        # Flattened index to 2D index
+        # Busca la celda de menor costo entre las que todavía no están tachadas.
         min_idx = np.unravel_index(np.argmin(costs_temp, axis=None), costs_temp.shape)
         i, j = min_idx
-        
-        # If the minimum cost is infinity, we can't allocate anymore
+
+        # Si el mínimo restante es infinito, ya no queda ninguna celda disponible.
         if costs_temp[i][j] == np.inf:
             break
-            
+
         quantity = min(supply[i], demand[j])
-        
+
         if quantity > 0:
             cost = quantity * costs[i][j]
             total_cost += cost
@@ -35,16 +40,16 @@ def min_cost(supply: np.ndarray, demand: np.ndarray, costs: np.ndarray, origins:
                 "units": float(quantity),
                 "cost": float(cost)
             })
-            
+
         supply[i] -= quantity
         demand[j] -= quantity
-        
-        # Cross out row or column
+
+        # Tacha la fila y/o columna que quedó saturada.
         if supply[i] == 0:
             costs_temp[i, :] = np.inf
         if demand[j] == 0:
             costs_temp[:, j] = np.inf
-            
+
     return {
         "method": "Costo Minimo",
         "total_cost": float(total_cost),

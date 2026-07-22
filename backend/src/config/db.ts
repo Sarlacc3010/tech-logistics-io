@@ -1,3 +1,10 @@
+/**
+ * Configuración e inicialización de las dos bases de datos: PostgreSQL (vía
+ * Prisma, para OptimizationModel/Solution/Project/User) y MongoDB (vía
+ * Mongoose, para el historial de chat del tutor). Se conecta a ambas al
+ * arrancar el servidor (ver server.ts); si alguna falla, el proceso termina
+ * (son consideradas críticas, no hay modo degradado sin base de datos).
+ */
 import { PrismaClient } from '@prisma/client';
 import mongoose from 'mongoose';
 import * as dotenv from 'dotenv';

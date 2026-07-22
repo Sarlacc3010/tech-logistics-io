@@ -1,3 +1,13 @@
+/**
+ * Log de auditoría plano, guardado como un array JSON en un archivo dentro
+ * del contenedor del backend (audit_logs.json). Registra las llamadas a
+ * interpret/validate/socratic y a los solvers directos (no el chat completo
+ * del Narrador, eso va a MongoDB — ver ia-interaction.model.ts). Es lo que
+ * lee audit.controller.ts para armar el Anexo de Interacción con IA.
+ *
+ * Limitación conocida: al no tener volumen montado en docker-compose.yml,
+ * este archivo se reinicia cada vez que se reconstruye el contenedor.
+ */
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -13,6 +23,7 @@ export interface AuditLog {
 export class AuditRepository {
   private static filePath = path.join(process.cwd(), 'audit_logs.json');
 
+  // Lee todo el archivo y lo parsea; si no existe, lo crea vacío.
   private static readLogs(): AuditLog[] {
     try {
       if (!fs.existsSync(this.filePath)) {
@@ -27,6 +38,8 @@ export class AuditRepository {
     }
   }
 
+  // Reescribe el archivo completo (no hay append incremental: se lee todo,
+  // se modifica en memoria, se vuelve a escribir todo).
   private static writeLogs(logs: AuditLog[]): void {
     try {
       fs.writeFileSync(this.filePath, JSON.stringify(logs, null, 2), 'utf-8');

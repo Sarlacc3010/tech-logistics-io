@@ -1,3 +1,9 @@
+/**
+ * Cliente HTTP hacia el Solver Service (Python/FastAPI). Un método por
+ * módulo, cada uno hace un POST simple al endpoint /solve correspondiente y
+ * propaga el detalle del error de FastAPI si algo falla, para que el
+ * controlador que lo llamó pueda mostrar un mensaje útil.
+ */
 import axios from 'axios';
 import * as dotenv from 'dotenv';
 

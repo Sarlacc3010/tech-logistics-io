@@ -1,3 +1,11 @@
+/**
+ * Script de siembra: crea un usuario, un proyecto y un ejercicio de ejemplo
+ * por cada uno de los 6 módulos, resolviéndolos de verdad contra el Solver
+ * Service (no son datos falsos, son soluciones reales). Se ejecuta solo si
+ * la base de datos está vacía (ver el guard `existingProject` abajo) — el
+ * entrypoint de Docker lo corre automáticamente en cada arranque del
+ * contenedor, así que es seguro reiniciar sin duplicar datos.
+ */
 import { PrismaClient } from '@prisma/client';
 import { SolverClientService } from './services/solver-client.service';
 

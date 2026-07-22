@@ -1,3 +1,17 @@
+"""Script CLI independiente de RAG (Retrieval-Augmented Generation) sobre
+ChromaDB + un modelo local de Ollama (mistral).
+
+Importante: este archivo NO está conectado a la API del Solver Service
+(main.py no lo importa) ni al backend Node.js. Es una herramienta separada
+para indexar casos de estudio (.json/.md) en una base vectorial local y
+hacerle preguntas desde la terminal. El RAG de PDFs que sí usa la aplicación
+en producción vive en backend/src/services/rag.service.ts (Node.js + Gemini).
+
+Uso:
+    python rag_pipeline.py --ingest ./casos --persist_dir ./chroma_db
+    python rag_pipeline.py --query "¿Cómo se resuelve un problema de transporte?"
+"""
+
 import argparse
 import json
 import os
@@ -23,16 +37,17 @@ def get_embedding_model() -> SentenceTransformer:
     return _embedding_model
 
 def normalize_case(obj: Any, source_path: Path) -> Dict[str, Any]:
-    """Extrae id, title, problem_type, solver_name, description, variables y results."""
+    """Extrae id, title, problem_type, solver_name, description, variables y results
+    de un caso de estudio en JSON, rellenando valores por defecto si faltan campos."""
     data = obj if isinstance(obj, dict) else {}
 
-    # Soporte fallback
+    # Nombre de respaldo si el JSON no trae "id"/"title"
     source_name = source_path.stem if source_path else "caso"
-    
+
     variables = data.get("variables", {})
     if isinstance(variables, list):
         variables = {str(item.get("name", i)): item.get("value") for i, item in enumerate(variables)}
-        
+
     results = data.get("results", {})
     if isinstance(results, list):
         results = {str(i): item for i, item in enumerate(results)}
@@ -48,7 +63,8 @@ def normalize_case(obj: Any, source_path: Path) -> Dict[str, Any]:
     }
 
 def build_document_text(normalized: Dict[str, Any]) -> str:
-    """Convierte el diccionario normalizado en una estructura Markdown legible."""
+    """Convierte el diccionario normalizado en una estructura Markdown legible,
+    lista para trocearse (chunk_text) e indexarse como embeddings."""
     title = normalized["title"]
     lines = [
         f"# {title}",
@@ -82,28 +98,32 @@ def build_document_text(normalized: Dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 def chunk_text(text: str, max_chars: int = 1500, overlap: int = 300) -> List[str]:
-    """Límite de 1500 caracteres y un solapamiento de 300."""
+    """Trocea un texto largo en fragmentos de máximo `max_chars`, con `overlap`
+    caracteres de solapamiento entre fragmentos consecutivos (para no perder
+    contexto que quede justo en el borde de un corte)."""
     if not text:
         return []
-    
+
     chunks = []
     start = 0
     text_length = len(text)
-    
+
     while start < text_length:
         end = min(start + max_chars, text_length)
         chunks.append(text[start:end])
         if end >= text_length:
             break
-        start = end - overlap
-        
+        start = end - overlap  # retrocede para generar el solapamiento
+
     return chunks
 
 def ingest_directory(path: str, client: chromadb.Client, persist_dir: Optional[str] = None) -> None:
-    """Busca archivos .json y .md, procesa los textos, genera embeddings en lotes, y los guarda."""
+    """Recorre un directorio buscando archivos .json y .md, normaliza cada uno,
+    genera sus embeddings en lote con SentenceTransformer, y los guarda en la
+    colección de ChromaDB para poder buscarlos después con `retrieve`."""
     target_path = Path(path)
     collection = client.get_or_create_collection(name=COLLECTION_NAME)
-    
+
     documents: List[str] = []
     metadatas: List[Dict[str, Any]] = []
     ids: List[str] = []
@@ -122,30 +142,31 @@ def ingest_directory(path: str, client: chromadb.Client, persist_dir: Optional[s
                     content = json.load(f)
             except Exception:
                 continue
-                
+
+            # Un archivo JSON puede traer un solo caso o una lista de casos
             items = content if isinstance(content, list) else [content]
-            
+
             for idx, item in enumerate(items):
                 normalized = normalize_case(item, file_path)
                 doc_text = build_document_text(normalized)
                 chunks = chunk_text(doc_text)
-                
+
                 for chunk_idx, chunk in enumerate(chunks):
                     documents.append(chunk)
                     metadatas.append({"source": str(file_path), "id": normalized["id"]})
                     ids.append(f"{file_path.stem}_{idx}_{chunk_idx}")
-                    
+
         elif file_path.suffix.lower() == ".md":
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
             except Exception:
                 continue
-                
+
             normalized = normalize_case({"description": content}, file_path)
             doc_text = build_document_text(normalized)
             chunks = chunk_text(doc_text)
-            
+
             for chunk_idx, chunk in enumerate(chunks):
                 documents.append(chunk)
                 metadatas.append({"source": str(file_path), "id": normalized["id"]})
@@ -155,8 +176,8 @@ def ingest_directory(path: str, client: chromadb.Client, persist_dir: Optional[s
         print(f"Generando embeddings para {len(documents)} fragmentos...")
         model = get_embedding_model()
         embeddings = model.encode(documents, convert_to_numpy=True, normalize_embeddings=True)
-        
-        # Guardar en ChromaDB
+
+        # Guarda documentos + embeddings + metadatos en ChromaDB (persistido en disco)
         collection.add(
             ids=ids,
             documents=documents,
@@ -168,30 +189,33 @@ def ingest_directory(path: str, client: chromadb.Client, persist_dir: Optional[s
         print("No se encontraron documentos válidos para ingerir.")
 
 def retrieve(query: str, client: chromadb.Client, top_k: int = 6) -> List[Dict[str, Any]]:
-    """Hace búsquedas semánticas en ChromaDB."""
+    """Búsqueda semántica: convierte la pregunta en un embedding y devuelve los
+    `top_k` fragmentos más similares ya indexados en ChromaDB."""
     collection = client.get_or_create_collection(name=COLLECTION_NAME)
     model = get_embedding_model()
-    
+
     query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
-    
+
     results = collection.query(
         query_embeddings=[query_embedding.tolist()],
         n_results=top_k
     )
-    
+
     retrieved = []
     if results["documents"] and results["documents"][0]:
         for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
             retrieved.append({"document": doc, "metadata": meta})
-            
+
     return retrieved
 
 def build_prompt(query: str, retrieved_docs: List[Dict[str, Any]], translation_dict: Dict[str, Any], solver_result_json: Dict[str, Any]) -> str:
-    """Instruye estrictamente al asistente con el formato deseado."""
+    """Arma el prompt final para el LLM local: reglas de estilo (lenguaje de
+    negocio, no álgebra), el resultado crudo del solver, el diccionario de
+    traducción de variables, y el contexto recuperado por RAG."""
     context_str = ""
     for i, doc in enumerate(retrieved_docs, 1):
         context_str += f"\n[Documento {i}]\n{doc['document']}\n"
-        
+
     prompt = f"""
 Eres un experto analista logístico. Tu tarea es explicar los resultados del modelo de optimización.
 
@@ -218,7 +242,8 @@ Respuesta:
     return prompt.strip()
 
 def query_local_llm(prompt: str, model: str = "mistral") -> str:
-    """Hace un POST request directo con requests a la API de Ollama."""
+    """Envía el prompt a un servidor Ollama local (por defecto localhost:11434)
+    y devuelve la respuesta generada. Requiere tener Ollama corriendo aparte."""
     payload = {
         "model": model,
         "prompt": prompt,
@@ -233,13 +258,16 @@ def query_local_llm(prompt: str, model: str = "mistral") -> str:
         return f"Error al conectar con Ollama: {str(e)}"
 
 def main():
+    """CLI: `--ingest <dir>` indexa casos de estudio, `--query <texto>` busca
+    contexto relevante y le pregunta al LLM local, usando datos de ejemplo
+    simulados para el resultado del solver y el diccionario de traducción."""
     parser = argparse.ArgumentParser(description="Sistema RAG local para logística usando ChromaDB y Ollama")
     parser.add_argument("--ingest", type=str, help="Ruta al directorio de archivos .json/.md para ingesta")
     parser.add_argument("--persist_dir", type=str, default="./chroma_db", help="Directorio para persistir ChromaDB")
     parser.add_argument("--query", type=str, help="Pregunta del usuario para el sistema RAG")
     args = parser.parse_args()
 
-    # Inicializar cliente de ChromaDB con sintaxis moderna (PersistentClient)
+    # Cliente de ChromaDB con persistencia en disco (no en memoria)
     client = chromadb.PersistentClient(path=args.persist_dir)
 
     if args.ingest:
@@ -249,16 +277,17 @@ def main():
     if args.query:
         print(f"Buscando información para la consulta: '{args.query}'...")
         docs = retrieve(args.query, client, top_k=6)
-        
-        # Para el ejemplo CLI, usaremos diccionarios simulados de solver y traducción
+
+        # Datos simulados solo para poder probar el flujo completo desde la CLI
+        # sin depender de una resolución real del backend.
         dummy_solver_result = {"status": "optimal", "objective": 15000}
         dummy_translation_dict = {"x1": "Cantidad a enviar desde Almacén A"}
-        
+
         print("Construyendo prompt y consultando al LLM local (Ollama)...")
         prompt = build_prompt(args.query, docs, dummy_translation_dict, dummy_solver_result)
-        
+
         response = query_local_llm(prompt, model="mistral")
-        
+
         print("\n" + "="*50)
         print("RESPUESTA DEL ASISTENTE LOGÍSTICO:")
         print("="*50)

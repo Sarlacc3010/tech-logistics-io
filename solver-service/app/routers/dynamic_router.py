@@ -1,3 +1,10 @@
+"""Endpoint de Programación Dinámica (`POST /dynamic/solve`).
+
+100% implementado desde cero (sin librerías de optimización), con dos
+algoritmos según `problem_type`: mochila 0/1 (`knapsack`) y tamaño de lote por
+Wagner-Whitin (`lot_sizing`). Ambos construyen su tabla DP completa y devuelven
+el detalle paso a paso via StepTracker."""
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
@@ -40,7 +47,9 @@ def solve_dynamic(payload: DPProblemInput):
                 {"capacity": capacity, "n_items": n},
             )
 
-            # DP table
+            # Tabla DP: dp[i][w] = valor máximo usando los primeros i objetos con
+            # capacidad w. Recurrencia de Bellman: para cada objeto, o se incluye
+            # (si cabe) o no, y se toma lo mejor de las dos opciones.
             dp = [[0 for _ in range(capacity + 1)] for _ in range(n + 1)]
 
             for i in range(1, n + 1):
@@ -58,7 +67,8 @@ def solve_dynamic(payload: DPProblemInput):
                     {"row": i, "dp_row": list(dp[i])},
                 )
 
-            # Backtrack to find items
+            # Retroceso: reconstruye qué objetos se usaron comparando cada fila
+            # contra la anterior (si difieren, el objeto de esa fila se incluyó).
             w = capacity
             selected_items = []
             for i in range(n, 0, -1):
@@ -98,14 +108,17 @@ def solve_dynamic(payload: DPProblemInput):
                 {"n_periods": n, "setup_cost": setup_cost, "holding_cost": holding_cost},
             )
 
-            # dp[i] is the minimum cost to satisfy demand from period i to n
+            # dp[i] = costo mínimo para satisfacer la demanda desde el período i hasta n.
             dp = [float('inf')] * (n + 1)
-            dp[n] = 0.0
-            best_next = [-1] * n
+            dp[n] = 0.0  # caso base: no queda demanda por cubrir, costo 0
+            best_next = [-1] * n  # hasta qué período conviene cubrir si se pide en el período i
 
             for i in range(n - 1, -1, -1):
                 current_holding = 0.0
                 accum_demand = 0.0
+                # Se evalúan todos los posibles "próximos pedidos" j >= i: pedir en i
+                # y cubrir la demanda hasta j implica pagar el costo de preparación una
+                # vez más el costo de mantener en inventario lo que se adelanta.
                 for j in range(i, n):
                     accum_demand += demands[j]
                     current_holding += demands[j] * (j - i) * holding_cost
@@ -122,12 +135,13 @@ def solve_dynamic(payload: DPProblemInput):
                     {"period": i + 1, "dp_value": round(dp[i], 4), "covers_up_to_period": best_next[i]},
                 )
 
-            # Reconstruct decisions
+            # Reconstruye la política óptima siguiendo los punteros best_next desde
+            # el período 1 hasta el final.
             decisions = []
             curr = 0
             while curr < n:
                 nxt = best_next[curr]
-                # Order in period `curr` covers demand up to `nxt - 1`
+                # El pedido en el período `curr` cubre la demanda hasta `nxt - 1`
                 qty = sum(demands[curr:nxt])
                 decisions.append({
                     "period": curr + 1,

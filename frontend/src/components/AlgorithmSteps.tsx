@@ -1,3 +1,10 @@
+/**
+ * Acordeón reutilizable que renderiza el detalle "paso a paso" (steps[]) que
+ * devuelve cualquiera de los solvers del backend Python. Cada paso se muestra
+ * colapsado (título) hasta que el usuario lo abre, y el campo `data` de cada
+ * paso (tableau, tabla, grafo residual, etc.) se dibuja automáticamente según
+ * su forma con DataView, sin necesitar una vista distinta por algoritmo.
+ */
 import React from 'react';
 import {
   Accordion,
@@ -23,6 +30,8 @@ function isPlainObject(value: any): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+// Formatea un valor primitivo para mostrarlo: números enteros tal cual,
+// decimales recortados a 4 cifras sin ceros de más, booleanos como sí/no.
 function formatPrimitive(value: any): string {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
@@ -30,6 +39,11 @@ function formatPrimitive(value: any): string {
   return String(value);
 }
 
+// Renderiza cualquier valor JSON del campo `data` de un paso de forma genérica
+// y recursiva: un array de objetos se ve como tabla, un array simple como
+// lista, un objeto como lista de definición (clave: valor), y todo lo demás
+// como texto — así cada algoritmo puede mandar cualquier estructura sin que
+// este componente necesite conocerla de antemano.
 function DataView({ value, dark }: { value: any; dark: boolean }) {
   const borderColor = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
   const mutedText = dark ? 'text-white/50' : 'text-black/50';
@@ -39,6 +53,7 @@ function DataView({ value, dark }: { value: any; dark: boolean }) {
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className={`font-mono text-[11px] ${mutedText}`}>—</span>;
 
+    // Array de objetos con forma similar (ej. filas de un tableau): se dibuja como tabla.
     if (value.every(v => isPlainObject(v))) {
       const columns = Array.from(new Set(value.flatMap(v => Object.keys(v))));
       return (
@@ -69,6 +84,7 @@ function DataView({ value, dark }: { value: any; dark: boolean }) {
       );
     }
 
+    // Array de valores sueltos (ej. una fila de la tabla DP): lista simple.
     return (
       <ul className="list-disc list-inside space-y-0.5">
         {value.map((v, i) => (
@@ -80,6 +96,7 @@ function DataView({ value, dark }: { value: any; dark: boolean }) {
     );
   }
 
+  // Objeto plano (ej. {u: [...], v: [...]} de MODI): lista de definición clave/valor.
   if (isPlainObject(value)) {
     const entries = Object.entries(value);
     return (
@@ -99,6 +116,8 @@ function DataView({ value, dark }: { value: any; dark: boolean }) {
   return <span className="font-mono text-[11px]">{formatPrimitive(value)}</span>;
 }
 
+// Componente público: si no hay steps, no renderiza nada (para que el módulo
+// de min_cost_flow, que no genera pasos, no muestre un acordeón vacío).
 export function AlgorithmSteps({ steps, dark = true, heading = 'Detalle paso a paso' }: AlgorithmStepsProps) {
   if (!steps || steps.length === 0) return null;
 

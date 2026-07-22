@@ -1,3 +1,10 @@
+/**
+ * Formulario manual de Programación Lineal / Entera (reutilizado por ambos
+ * módulos "lp" e "ip"): tabla de variables (con isInteger/upBound para poder
+ * armar un modelo de Programación Entera a mano) y tabla de restricciones.
+ * Si el JSON recibido no tiene la forma esperada, cae a un textarea de JSON
+ * crudo como respaldo (ej. mientras el LLM todavía no terminó de interpretar).
+ */
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, AlertCircle } from 'lucide-react';
 

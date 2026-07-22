@@ -1,3 +1,7 @@
+"""Algoritmo de Dijkstra: ruta más corta entre un nodo origen y un nodo destino
+en un grafo dirigido con pesos no negativos. Implementación propia (sin
+NetworkX), registrando cada nodo fijado y las relajaciones de distancia."""
+
 from typing import Any, Dict, List
 
 from app.algorithms.steps import StepTracker
@@ -16,8 +20,8 @@ def dijkstra(nodes: List[str], edges: List[Dict[str, Any]], source: str, target:
             raise ValueError("Dijkstra no admite pesos negativos; considere Bellman-Ford")
         adjacency.setdefault(e["source"], []).append((e["target"], w))
 
-    dist = {n: INF for n in nodes}
-    prev: Dict[str, str] = {}
+    dist = {n: INF for n in nodes}  # distancia tentativa desde source a cada nodo
+    prev: Dict[str, str] = {}  # predecesor de cada nodo en el camino más corto encontrado
     dist[source] = 0.0
     unvisited = set(nodes)
 
@@ -29,12 +33,16 @@ def dijkstra(nodes: List[str], edges: List[Dict[str, Any]], source: str, target:
     )
 
     while unvisited:
+        # Se fija el nodo no visitado con menor distancia tentativa: como todos los
+        # pesos son >= 0, esa distancia ya no puede mejorar (es la definitiva).
         reachable = [n for n in unvisited if dist[n] < INF]
         if not reachable:
-            break
+            break  # los nodos restantes son inalcanzables desde source
         u = min(reachable, key=lambda n: dist[n])
         unvisited.remove(u)
 
+        # Relajación: para cada arco saliente de u, si pasar por u mejora la
+        # distancia tentativa del vecino, se actualiza.
         relaxed = []
         for v, w in adjacency.get(u, []):
             if v in unvisited and dist[u] + w < dist[v]:
@@ -51,11 +59,12 @@ def dijkstra(nodes: List[str], edges: List[Dict[str, Any]], source: str, target:
         )
 
         if u == target:
-            break
+            break  # ya se fijó la distancia definitiva del destino, no hace falta seguir
 
     if dist[target] == INF:
         return {"status": "No existe camino", "path": [], "cost": None, "steps": [s.model_dump() for s in tracker.steps]}
 
+    # Reconstruye el camino siguiendo los predecesores desde target hasta source.
     path = [target]
     while path[-1] != source:
         path.append(prev[path[-1]])

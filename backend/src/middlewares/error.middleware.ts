@@ -1,3 +1,8 @@
+/**
+ * Manejador de errores centralizado de Express (se registra al final de la
+ * cadena de middlewares en app.ts). Cualquier `next(error)` de un controller
+ * termina aquí en vez de tumbar el proceso.
+ */
 import { Request, Response, NextFunction } from 'express';
 
 export function errorHandler(

@@ -1,3 +1,17 @@
+/**
+ * Middleware de auditoría: intercepta la respuesta de un endpoint del tutor
+ * de IA (o del solver) para registrarla, sin que cada controller tenga que
+ * hacerlo a mano. Se aplica con `auditMiddleware('tipo')` en routes/index.ts,
+ * uno distinto por endpoint (ej. 'groq_tutor_interpret').
+ *
+ * Dos destinos según el tipo:
+ * - "groq_tutor" (el Narrador, /tutor/ask): guarda en MongoDB el historial de
+ *   chat completo (IAInteraction), porque ahí sí interesa la conversación
+ *   completa turno a turno.
+ * - Cualquier otro tipo (interpret/validate/socratic, y los solvers): guarda
+ *   un registro plano en el archivo audit_logs.json vía AuditRepository —
+ *   es lo que alimenta el Anexo de Interacción con IA.
+ */
 import { Request, Response, NextFunction } from 'express';
 import { AuditRepository } from '../repositories/audit.repository';
 import IAInteraction from '../models/ia-interaction.model';
@@ -7,7 +21,8 @@ export function auditMiddleware(type: string) {
     const originalSend = res.send;
     let responseBody: any = null;
 
-    // Intercept response
+    // Intercepta res.send para poder leer el cuerpo de la respuesta antes de
+    // que salga (Express no expone esto de otra forma sin un middleware).
     res.send = function (body: any): Response {
       try {
         responseBody = JSON.parse(body);
@@ -17,6 +32,7 @@ export function auditMiddleware(type: string) {
       return originalSend.call(this, body);
     };
 
+    // Solo se audita si la respuesta salió bien (2xx); errores no se registran aquí.
     res.on('finish', () => {
       if (res.statusCode >= 200 && res.statusCode < 300) {
         if (type === 'groq_tutor') {
@@ -26,7 +42,7 @@ export function auditMiddleware(type: string) {
           const mathematicalSolution = req.body.mathematicalSolution || {};
           const userMessage = req.body.userMessage || '';
           const reply = responseBody?.reply || '';
-          
+
           // Reconstruct the history that was sent, plus the new turn
           const incomingHistory = req.body.chatHistory || [];
           const updatedHistory = [
@@ -47,6 +63,8 @@ export function auditMiddleware(type: string) {
             }
           ];
 
+          // Guardado asíncrono "fire and forget": no bloquea la respuesta al
+          // cliente, solo se registra el resultado en consola.
           IAInteraction.create({
             userId,
             modelId: req.body.modelId || undefined,

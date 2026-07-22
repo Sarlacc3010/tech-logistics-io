@@ -1,3 +1,10 @@
+/**
+ * Formulario manual del módulo de Transporte: tabla editable de origen x
+ * destino (costos, oferta, demanda), con filas/columnas agregables, selector
+ * del método de solución inicial (Vogel/Noroeste/Costo Mínimo) e indicador de
+ * si el problema está balanceado. Si el JSON no tiene la forma esperada, cae
+ * a un textarea de JSON crudo como respaldo.
+ */
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, AlertCircle } from 'lucide-react';
 
